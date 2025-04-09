@@ -16,27 +16,28 @@ import {
   Globe, 
   MapPin,
   Calendar,
-  BarChart3
+  BarChart3,
+  AlertCircle
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { supabase } from "@/lib/supabase/client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface Profile {
   id: string;
-  company_name: string;
-  contact_email: string;
-  contact_phone: string;
+  email: string;
   role: string;
+  company_name: string | null;
+  contact_phone: string | null;
+  is_active: boolean;
   created_at: string;
-  business_details: {
-    address?: string;
-    website?: string;
-    description?: string;
-  };
-  stats: {
-    total_evaluations: number;
-    completed_evaluations: number;
-    average_rating: number;
-  };
+  last_sign_in_at: string | null;
+  updated_at: string | null;
+}
+
+interface ProfileStats {
+  total_evaluations: number;
+  completed_evaluations: number;
+  average_rating: number;
 }
 
 export default function Profile() {
@@ -44,63 +45,58 @@ export default function Profile() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [stats, setStats] = useState<ProfileStats>({
+    total_evaluations: 0,
+    completed_evaluations: 0,
+    average_rating: 0
+  });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProfile = async () => {
-      const supabase = createClient();
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        router.push('/auth/login');
-        return;
-      }
+      try {
+        setError(null);
+        // Verificar sesión
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        
+        if (authError || !user) {
+          router.push('/auth/login');
+          return;
+        }
 
-      // Mock profile data
-      const mockProfile: Profile = {
-        id: user.id,
-        company_name: "Tech Solutions Inc.",
-        contact_email: user.email || "user@example.com",
-        contact_phone: "+1 (555) 123-4567",
-        role: "admin",
-        created_at: "2024-01-15T10:00:00Z",
-        business_details: {
-          address: "123 Business Ave, Tech City",
-          website: "https://techsolutions.example.com",
-          description: "Leading provider of enterprise solutions"
-        },
-        stats: {
+        // Obtener perfil
+        const { data: profileData, error: profileError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (profileError) {
+          throw new Error('No se pudo cargar la información del perfil');
+        }
+
+        setProfile(profileData);
+
+        // TODO: Implementar obtención de estadísticas reales
+        // Por ahora usamos datos de ejemplo
+        setStats({
           total_evaluations: 45,
           completed_evaluations: 38,
           average_rating: 4.7
-        }
-      };
+        });
 
-      setProfile(mockProfile);
+      } catch (error: any) {
+        setError(error.message);
+        toast({
+          title: "Error",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     };
 
     fetchProfile();
   }, [router, toast]);
-
-  const handleChange = (field: string, value: string) => {
-    if (!profile) return;
-
-    if (field.includes('.')) {
-      const [parent, child] = field.split('.');
-      setProfile(prev => ({
-        ...prev!,
-        [parent]: {
-          ...prev![parent as keyof Profile],
-          [child]: value
-        }
-      }));
-    } else {
-      setProfile(prev => ({
-        ...prev!,
-        [field]: value
-      }));
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,14 +104,22 @@ export default function Profile() {
     setLoading(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const { error } = await supabase
+        .from('users')
+        .update({
+          company_name: profile.company_name,
+          contact_phone: profile.contact_phone,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', profile.id);
+
+      if (error) throw error;
 
       toast({
         title: "Perfil actualizado",
         description: "Los cambios han sido guardados exitosamente.",
       });
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Error",
         description: "No se pudo actualizar el perfil. Por favor, intente nuevamente.",
@@ -126,8 +130,31 @@ export default function Profile() {
     }
   };
 
+  const handleChange = (field: keyof Profile, value: string) => {
+    if (!profile) return;
+    setProfile(prev => ({
+      ...prev!,
+      [field]: value
+    }));
+  };
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   if (!profile) {
-    return <div>Cargando...</div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-muted-foreground">Cargando perfil...</p>
+      </div>
+    );
   }
 
   return (
@@ -154,7 +181,7 @@ export default function Profile() {
             <BarChart3 className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{profile.stats.total_evaluations}</div>
+            <div className="text-2xl font-bold">{stats.total_evaluations}</div>
           </CardContent>
         </Card>
         <Card>
@@ -165,7 +192,7 @@ export default function Profile() {
             <BarChart3 className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{profile.stats.completed_evaluations}</div>
+            <div className="text-2xl font-bold">{stats.completed_evaluations}</div>
           </CardContent>
         </Card>
         <Card>
@@ -176,7 +203,7 @@ export default function Profile() {
             <BarChart3 className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{profile.stats.average_rating}/5.0</div>
+            <div className="text-2xl font-bold">{stats.average_rating}/5.0</div>
           </CardContent>
         </Card>
       </div>
@@ -194,8 +221,7 @@ export default function Profile() {
                 </Label>
                 <Input
                   id="company_name"
-                  required
-                  value={profile.company_name}
+                  value={profile.company_name || ''}
                   onChange={(e) => handleChange("company_name", e.target.value)}
                 />
               </div>
@@ -206,7 +232,7 @@ export default function Profile() {
                 <Input
                   id="email"
                   type="email"
-                  value={profile.contact_email}
+                  value={profile.email}
                   disabled
                 />
               </div>
@@ -217,33 +243,23 @@ export default function Profile() {
                 <Input
                   id="contact_phone"
                   type="tel"
-                  value={profile.contact_phone}
+                  value={profile.contact_phone || ''}
                   onChange={(e) => handleChange("contact_phone", e.target.value)}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="website" className="flex items-center gap-2">
-                  <Globe className="w-4 h-4" /> Sitio Web
+                <Label htmlFor="role" className="flex items-center gap-2">
+                  <UserCircle className="w-4 h-4" /> Rol en el Sistema
                 </Label>
                 <Input
-                  id="website"
-                  type="url"
-                  value={profile.business_details?.website || ""}
-                  onChange={(e) => handleChange("business_details.website", e.target.value)}
-                  placeholder="https://"
+                  id="role"
+                  value={profile.role === 'supplier' ? 'Proveedor' : 
+                         profile.role === 'evaluator' ? 'Evaluador' : 
+                         profile.role === 'admin' ? 'Administrador' : profile.role}
+                  disabled
                 />
               </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="address" className="flex items-center gap-2">
-                  <MapPin className="w-4 h-4" /> Dirección
-                </Label>
-                <Input
-                  id="address"
-                  value={profile.business_details?.address || ""}
-                  onChange={(e) => handleChange("business_details.address", e.target.value)}
-                />
-              </div>
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2">
                 <Label htmlFor="created_at" className="flex items-center gap-2">
                   <Calendar className="w-4 h-4" /> Fecha de Registro
                 </Label>
@@ -257,12 +273,30 @@ export default function Profile() {
                   disabled
                 />
               </div>
+              {profile.last_sign_in_at && (
+                <div className="space-y-2">
+                  <Label htmlFor="last_login" className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4" /> Último Acceso
+                  </Label>
+                  <Input
+                    id="last_login"
+                    value={new Date(profile.last_sign_in_at).toLocaleDateString('es-ES', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                    disabled
+                  />
+                </div>
+              )}
             </div>
           </CardContent>
           <CardFooter>
-            <Button type="submit" disabled={loading} className="ml-auto gap-2">
+            <Button type="submit" className="w-full gap-2" disabled={loading}>
               <Save className="w-4 h-4" />
-              {loading ? "Guardando..." : "Guardar Cambios"}
+              {loading ? "Guardando cambios..." : "Guardar Cambios"}
             </Button>
           </CardFooter>
         </form>

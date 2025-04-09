@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,7 +18,7 @@ import {
   MessageSquareWarning,
   BarChart2,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { supabase } from "@/lib/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 
@@ -52,7 +53,6 @@ export default function DashboardLayout({
 
   useEffect(() => {
     const checkAuth = async () => {
-      const supabase = createClient();
       const { data: { user }, error } = await supabase.auth.getUser();
 
       if (error || !user) {
@@ -113,7 +113,6 @@ export default function DashboardLayout({
 
   const handleLogout = async () => {
     try {
-      const supabase = createClient();
       await supabase.auth.signOut();
       router.push('/auth/login');
     } catch (error) {
@@ -167,7 +166,14 @@ export default function DashboardLayout({
         <div className="flex h-full flex-col">
           {/* Logo */}
           <div className="flex h-16 items-center justify-center border-b px-4">
-            <h1 className="text-xl font-bold">SupplierEval Pro</h1>
+          <Image
+              src="/ccmin-logo.png"
+              alt="CCMIN Logo"
+              width={180}
+              height={60}
+              priority
+              
+            />
           </div>
 
           {/* Navigation */}

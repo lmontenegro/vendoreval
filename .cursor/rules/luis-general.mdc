@@ -1,0 +1,39 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+---
+description: Mis reglas
+globs: *.*
+alwaysApply: false
+---
+#  Reglas
+
+Siempre considera estas reglas si aplican
+
+
+
+- Realizar estrictamente lo señalado.
+- [frontend-dev.mdc](mdc:.cursor/rules/frontend-dev.mdc)
+- [project-guidelines.mdc](mdc:.cursor/rules/project-guidelines.mdc)
+- Nunca debes corromper el schema en [schema.sql](mdc:migrations/schema.sql)
+- Respeta el Stack Tecnológico
+    - Frontend: Next.js, TypeScript, React, TailwindCSS, Shadcn/UI
+    - Base de datos: Supabase
+    - Infraestructura: AWS (Amplify)
+    - Para acceso a base de datos: Usar siempre el cliente de Supabase directamente. NO usar SQLAlchemy u otros ORM.
+- Nunca sobre escribas mi archivo .env en cualquiera de las aplicaciones del monorepo. Siempre pregunta y confirma.
+- No proponer cosas que no se han señalado o solicitado.
+- No pares hasta completarlo
+
+
+# Estilo y Buenas Prácticas:
+
+- Código limpio y comentado
+- Uso de eslint y prettier para formato
+- Código reutilizable y limpio
+- Siempre usar lo ya realizado antes de crear recursos nuevos.
+- No usar mocks si no se ha señalado explicitamente.
+- Usar siempre las variables de entorno ya declaradas, y SIEMPRE pedir confirmación para crear o modificar el archivo .env

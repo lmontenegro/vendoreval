@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, UserCircle, PencilIcon } from "lucide-react";
+import { Plus, UserCircle, PencilIcon, AlertCircle } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
   Select,
@@ -16,34 +16,46 @@ import {
 import { format } from "date-fns";
 import { useToast } from "@/components/ui/use-toast";
 import { getUsers, type User } from "@/lib/services/user-service";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function Users() {
   const router = useRouter();
   const { toast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
 
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const { data, error } = await getUsers();
+        setError(null);
+        const data = await getUsers();
+        setUsers(data);
+      } catch (error: any) {
+        // Manejar diferentes tipos de errores
+        if (error.message === "No hay sesión activa") {
+          router.push('/auth/login');
+          return;
+        }
         
-        if (error) throw error;
-        if (data) setUsers(data);
-      } catch (error) {
-        toast({
-          title: "Error",
-          description: "No se pudieron cargar los usuarios.",
-          variant: "destructive",
-        });
+        if (error.message === "No tienes permisos para ver la lista de usuarios") {
+          setError("No tienes permisos para acceder a esta sección. Por favor, contacta al administrador si crees que esto es un error.");
+        } else {
+          setError("Ocurrió un error al cargar los usuarios. Por favor, intenta nuevamente.");
+          toast({
+            title: "Error",
+            description: error.message || "No se pudieron cargar los usuarios.",
+            variant: "destructive",
+          });
+        }
       } finally {
         setLoading(false);
       }
     };
 
     fetchUsers();
-  }, [toast]);
+  }, [router, toast]);
 
   const getRoleLabel = (role: string) => {
     switch (role) {
@@ -59,9 +71,9 @@ export default function Users() {
   };
 
   const getInitials = (email: string) => {
-    const name = email.split('@')[0].replace('.', ' ');
-    return name
-      .split(' ')
+    return email
+      .split('@')[0]
+      .split('.')
       .map(part => part.charAt(0).toUpperCase())
       .join('');
   };
@@ -74,9 +86,23 @@ export default function Users() {
   });
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-screen">
-      <p className="text-muted-foreground">Cargando usuarios...</p>
-    </div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-muted-foreground">Cargando usuarios...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error de Acceso</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      </div>
+    );
   }
 
   return (
@@ -128,16 +154,13 @@ export default function Users() {
               >
                 <div className="flex items-center gap-4">
                   <Avatar className="h-10 w-10">
-                    <AvatarImage src={user.avatar_url} alt={user.contact_email} />
-                    <AvatarFallback>{getInitials(user.contact_email)}</AvatarFallback>
+                    <AvatarFallback>{getInitials(user.email)}</AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium">{user.contact_email}</p>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <span>{user.business_details.position}</span>
-                      <span>•</span>
-                      <span>{user.department}</span>
-                    </div>
+                    <p className="font-medium">{user.email}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {user.company_name}
+                    </p>
                     <div className="text-xs text-muted-foreground mt-1">
                       {user.contact_phone}
                     </div>
@@ -149,9 +172,11 @@ export default function Users() {
                     <span className="text-xs text-muted-foreground">
                       Registro: {format(new Date(user.created_at), 'dd/MM/yyyy')}
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      Último acceso: {format(new Date(user.last_login), 'dd/MM/yyyy HH:mm')}
-                    </span>
+                    {user.last_sign_in_at && (
+                      <span className="text-xs text-muted-foreground">
+                        Último acceso: {format(new Date(user.last_sign_in_at), 'dd/MM/yyyy HH:mm')}
+                      </span>
+                    )}
                   </div>
                   <span
                     className={`px-2 py-1 rounded-full text-xs ${

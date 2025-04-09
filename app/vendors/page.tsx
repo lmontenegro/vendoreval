@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Building2, PencilIcon, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { Plus, Building2, PencilIcon, AlertCircle } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Select,
@@ -13,86 +13,88 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getVendors, type Vendor } from "@/lib/services/vendor-service";
+import { getVendors, type VendorWithUsers } from "@/lib/services/vendor-service";
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ExternalLink, Phone, Mail, MapPin } from 'lucide-react';
 
 export default function Vendors() {
   const router = useRouter();
   const { toast } = useToast();
-  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [vendors, setVendors] = useState<VendorWithUsers[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
 
   useEffect(() => {
-    const fetchVendors = async () => {
+    async function loadVendors() {
       try {
+        setLoading(true);
+        setError(null);
         const { data, error } = await getVendors();
         
-        if (error) throw error;
-        if (data) setVendors(data);
-      } catch (error) {
-        toast({
-          title: "Error",
-          description: "No se pudieron cargar los proveedores.",
-          variant: "destructive",
-        });
+        if (error) {
+          if (error.message.includes("No has iniciado sesión")) {
+            router.push('/auth/login');
+            return;
+          }
+          setError(error.message);
+        } else {
+          setVendors(data);
+        }
+      } catch (err: any) {
+        setError(err.message || "Error al cargar proveedores");
       } finally {
         setLoading(false);
       }
-    };
-
-    fetchVendors();
-  }, [toast]);
-
-  const getComplianceIcon = (status: string) => {
-    switch (status) {
-      case 'compliant':
-        return <CheckCircle2 className="w-5 h-5 text-green-600" />;
-      case 'pending':
-        return <AlertTriangle className="w-5 h-5 text-yellow-600" />;
-      case 'non_compliant':
-        return <XCircle className="w-5 h-5 text-red-600" />;
-      default:
-        return null;
     }
-  };
 
-  const getComplianceLabel = (status: string) => {
-    switch (status) {
-      case 'compliant':
-        return 'Cumple';
-      case 'pending':
-        return 'En Revisión';
-      case 'non_compliant':
-        return 'No Cumple';
-      default:
-        return status;
-    }
-  };
+    loadVendors();
+  }, [router]);
 
-  const getComplianceClass = (status: string) => {
-    switch (status) {
-      case 'compliant':
-        return 'bg-green-100 text-green-700';
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-700';
-      case 'non_compliant':
-        return 'bg-red-100 text-red-700';
-      default:
-        return 'bg-gray-100 text-gray-700';
-    }
-  };
-
-  const filteredVendors = vendors.filter(vendor => {
+  const filteredVendors = vendors?.filter(vendor => {
     if (filter === "all") return true;
-    if (filter === "active") return vendor.status === "Activo";
-    if (filter === "inactive") return vendor.status === "Inactivo";
-    return vendor.category === filter;
-  });
+    if (filter === "active") return vendor.is_active;
+    if (filter === "inactive") return !vendor.is_active;
+    // Eliminamos el filtro por categoría ya que no existe en la nueva interfaz
+    return true;
+  }) || [];
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-screen">
-      <p className="text-muted-foreground">Cargando proveedores...</p>
-    </div>;
+    return (
+      <div className="container mx-auto p-6 space-y-6">
+        <h1 className="text-3xl font-bold mb-6">Proveedores</h1>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map((i) => (
+            <Card key={i} className="w-full">
+              <CardHeader>
+                <Skeleton className="h-8 w-3/4" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-2/3" />
+                <Skeleton className="h-4 w-1/2" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-6">
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle className="h-4 w-4 mr-2" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+        <Button onClick={() => router.push('/dashboard')} className="mt-4">
+          Volver al Dashboard
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -121,9 +123,6 @@ export default function Vendors() {
             <SelectItem value="all">Todos los proveedores</SelectItem>
             <SelectItem value="active">Proveedores activos</SelectItem>
             <SelectItem value="inactive">Proveedores inactivos</SelectItem>
-            <SelectItem value="Materiales">Materiales</SelectItem>
-            <SelectItem value="Servicios">Servicios</SelectItem>
-            <SelectItem value="Equipamiento">Equipamiento</SelectItem>
           </SelectContent>
         </Select>
         <p className="text-sm text-muted-foreground">
@@ -149,31 +148,25 @@ export default function Vendors() {
                   <div>
                     <p className="font-medium">{vendor.name}</p>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <span>{vendor.category}</span>
+                      <span>RUC: {vendor.ruc}</span>
                       <span>•</span>
-                      <span>{vendor.contact.email}</span>
+                      <span>{vendor.contact_email}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                      <span>Calificación: ⭐ {vendor.rating}</span>
-                      <span>•</span>
-                      <span>Certificaciones: {vendor.certifications.length}</span>
-                    </div>
+                    {vendor.services_provided && vendor.services_provided.length > 0 && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                        <span>Servicios: {vendor.services_provided.join(', ')}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="flex flex-col items-end">
-                    <div className="flex items-center gap-2">
-                      {getComplianceIcon(vendor.compliance_status || '')}
-                      <span className={`px-2 py-1 rounded-full text-xs ${getComplianceClass(vendor.compliance_status || '')}`}>
-                        {getComplianceLabel(vendor.compliance_status || '')}
-                      </span>
-                    </div>
                     <span className={`px-2 py-1 mt-2 rounded-full text-xs ${
-                      vendor.status === "Activo"
+                      vendor.is_active
                         ? "bg-green-100 text-green-700"
                         : "bg-orange-100 text-orange-700"
                     }`}>
-                      {vendor.status}
+                      {vendor.is_active ? "Activo" : "Inactivo"}
                     </span>
                   </div>
                   <Button 

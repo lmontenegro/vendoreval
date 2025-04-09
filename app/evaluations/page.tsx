@@ -27,6 +27,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { getEvaluations, type Evaluation } from "@/lib/services/evaluation-service";
 import { addDays, format, isWithinInterval } from "date-fns";
+import type { DateRange } from "react-day-picker";
 
 export default function Evaluations() {
   const router = useRouter();
@@ -114,6 +115,14 @@ export default function Evaluations() {
     });
   };
 
+  const handleDateRangeChange = (date: DateRange | undefined) => {
+    if (date?.from && date?.to) {
+      setDateRange({ from: date.from, to: date.to });
+    }
+  };
+
+  console.log("evaluations", evaluations)
+
   const filteredAndSortedEvaluations = evaluations
     .filter(evaluation => {
       const matchesSearch = evaluation.title.toLowerCase().includes(searchTerm.toLowerCase());
@@ -123,10 +132,17 @@ export default function Evaluations() {
         (complianceFilter === "medium" && (evaluation.score || 0) >= 70 && (evaluation.score || 0) < 90) ||
         (complianceFilter === "low" && (evaluation.score || 0) < 70);
       const matchesDate = dateRange.from && dateRange.to
-        ? isWithinInterval(new Date(evaluation.created_at), {
-            start: dateRange.from,
-            end: dateRange.to,
-          })
+        ? (() => {
+            const startDate = new Date(dateRange.from);
+            const endDate = new Date(dateRange.to);
+            endDate.setHours(23, 59, 59, 999);
+            const createdDate = new Date(evaluation.created_at);            
+            
+            return isWithinInterval(createdDate, {
+              start: startDate,
+              end: endDate
+            });
+          })()
         : true;
 
       return matchesSearch && matchesStatus && matchesCompliance && matchesDate;
@@ -181,7 +197,7 @@ export default function Evaluations() {
 
         <DatePickerWithRange
           date={dateRange}
-          setDate={setDateRange}
+          setDate={handleDateRangeChange}
         />
 
         <Select value={statusFilter} onValueChange={setStatusFilter}>

@@ -37,12 +37,11 @@ export async function getEvaluations(): Promise<{ data: Evaluation[] | null; err
   try {
     // Simulate network latency
     await new Promise(resolve => setTimeout(resolve, 800));
-    
+
     if (!mockEvaluations || !Array.isArray(mockEvaluations)) {
       console.error('Mock evaluations data is invalid:', mockEvaluations);
       throw new Error('Invalid mock data');
     }
-
     return { data: mockEvaluations, error: null };
   } catch (error) {
     console.error('Error fetching evaluations:', error);
@@ -52,9 +51,9 @@ export async function getEvaluations(): Promise<{ data: Evaluation[] | null; err
 
 export function calculateCategoryScore(categories: EvaluationCategory[]): number | null {
   if (categories.some(cat => cat.score === null)) return null;
-  
+
   const totalWeight = categories.reduce((sum, cat) => sum + cat.weight, 0);
   const weightedScore = categories.reduce((sum, cat) => sum + ((cat.score || 0) * cat.weight), 0);
-  
+
   return totalWeight > 0 ? Math.round((weightedScore / totalWeight) * 100) / 100 : null;
 }

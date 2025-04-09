@@ -87,14 +87,14 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
       setEvaluation(prev => ({
         ...prev!,
         [parent]: {
-          ...prev![parent],
+          ...(prev![parent as keyof Evaluation] as Record<string, any>),
           [child]: value
         }
       }));
     } else {
       setEvaluation(prev => ({
         ...prev!,
-        [field]: value
+        [field as keyof Evaluation]: value
       }));
     }
   };

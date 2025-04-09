@@ -9,8 +9,8 @@ import { useToast } from "@/components/ui/use-toast";
 const recommendations = [
   {
     id: "rec-1",
-    title: "Mejorar tiempos de entrega",
-    description: "Implementar sistema de seguimiento en tiempo real para optimizar la cadena de suministro",
+    title: "Mejorar visibilidad de los riesgos",
+    description: "Implementar sistema de seguimiento en tiempo real de incidentes.",
     supplier: "Proveedor A",
     status: "pending",
     priority: "Alta",
@@ -35,8 +35,8 @@ const recommendations = [
       "Optimización de rutas y recursos"
     ],
     relatedRecommendations: [
-      { id: "rec-4", title: "Actualizar flota de vehículos", status: "pending" },
-      { id: "rec-5", title: "Implementar sistema de gestión de almacén", status: "in_progress" }
+      { id: "rec-4", title: "Actualizar controles", status: "pending" },
+      { id: "rec-5", title: "Implementar sistema de gestión de ciberseguridad", status: "in_progress" }
     ]
   },
   {

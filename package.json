@@ -1,12 +1,13 @@
 {
-  "name": "nextjs",
+  "name": "vendoreval",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "create-users": "NODE_OPTIONS='--loader ts-node/esm' ts-node --project tsconfig.json scripts/create-users.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -39,8 +40,8 @@
     "@radix-ui/react-toggle-group": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.2",
     "@react-pdf/renderer": "^3.4.0",
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/ssr": "^0.1.0",
-    "@supabase/supabase-js": "^2.39.0",
     "@types/node": "20.6.2",
     "@types/react": "18.2.22",
     "@types/react-dom": "18.2.7",
@@ -70,5 +71,9 @@
     "typescript": "5.2.2",
     "vaul": "^0.9.9",
     "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.49.4",
+    "ts-node": "^10.9.2"
   }
 }

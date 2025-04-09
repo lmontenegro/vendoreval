@@ -1,0 +1,39 @@
+# Configuración de Supabase CLI
+project_id = "pagveoabnaiztudqglvh"
+
+[api]
+# Configuraciones para la API
+enabled = true
+port = 54321
+schemas = ["public", "storage", "auth"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+# Configuraciones para la base de datos
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+# Configuraciones para Supabase Studio
+enabled = true
+port = 54323
+api_url = "http://localhost:54321"
+
+[inbucket]
+# Configuraciones para el servicio de email
+enabled = true
+port = 54324
+
+[storage]
+# Configuraciones para el almacenamiento
+enabled = true
+
+[auth]
+# Configuraciones para la autenticación
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["https://localhost:3000"]
+jwt_expiry = 3600
+enable_signup = true
