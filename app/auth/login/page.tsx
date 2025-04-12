@@ -1,60 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/components/ui/use-toast";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase/client";
+import { signInWithPasswordAction } from "../actions";
 
 export default function Login() {
-  const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    email: "",
-    password: ""
-  });
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData(prev => ({
-      ...prev,
-      [e.target.name]: e.target.value
-    }));
-  };
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
-
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: formData.email,
-        password: formData.password,
-      });
-
-      if (error) throw error;
-
-      toast({
-        title: "Inicio de sesión exitoso",
-        description: "Bienvenido de vuelta.",
-      });
-
-      router.push("/dashboard");
-      router.refresh();
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Credenciales incorrectas. Por favor, intenta nuevamente.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <Card className="w-full">
@@ -64,7 +22,25 @@ export default function Login() {
           Ingresa tus credenciales para continuar
         </p>
       </CardHeader>
-      <form onSubmit={handleSubmit}>
+      <form action={async (formData) => {
+        setLoading(true);
+        setError(null);
+        console.log("Form submitted, calling Server Action...");
+        const result = await signInWithPasswordAction(formData);
+        setLoading(false);
+
+        if (result?.error) {
+          console.error("Server Action returned error:", result.error);
+          setError(result.error);
+          toast({
+            title: "Error de inicio de sesión",
+            description: result.error,
+            variant: "destructive",
+          });
+        } else {
+          console.log("Server Action successful (redirection should occur).");
+        }
+      }}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Correo electrónico</Label>
@@ -74,8 +50,6 @@ export default function Login() {
               type="email"
               placeholder="correo@empresa.com"
               required
-              value={formData.email}
-              onChange={handleChange}
             />
           </div>
           <div className="space-y-2">
@@ -85,10 +59,11 @@ export default function Login() {
               name="password"
               type="password"
               required
-              value={formData.password}
-              onChange={handleChange}
             />
           </div>
+          {error && (
+            <p className="text-sm font-medium text-destructive">{error}</p>
+          )}
           <Link
             href="/auth/reset-password"
             className="text-sm text-primary hover:underline block text-right"

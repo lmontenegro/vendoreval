@@ -24,6 +24,8 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/use-toast";
 import { ArrowLeft, Save, Plus, Trash2 } from "lucide-react";
 import { evaluationTypes, questionTypes } from "@/lib/supabase/mock-data";
+import { createEvaluation } from "@/lib/services/evaluation-service";
+import { v4 as uuidv4 } from 'uuid';
 
 interface Question {
   id: string;
@@ -33,6 +35,7 @@ interface Question {
   weight: number;
   order: number;
   options: any;
+  category?: string;
 }
 
 export default function NewEvaluation() {
@@ -58,13 +61,19 @@ export default function NewEvaluation() {
   const handleChange = (field: string, value: any) => {
     if (field.includes('.')) {
       const [parent, child] = field.split('.');
-      setEvaluation(prev => ({
-        ...prev,
-        [parent]: {
-          ...prev[parent as keyof typeof prev],
-          [child]: value
+      setEvaluation(prev => {
+        const parentObj = prev[parent as keyof typeof prev];
+        if (typeof parentObj === 'object' && parentObj !== null) {
+          return {
+            ...prev,
+            [parent]: {
+              ...parentObj,
+              [child]: value
+            }
+          };
         }
-      }));
+        return prev;
+      });
     } else {
       setEvaluation(prev => ({
         ...prev,
@@ -88,12 +97,13 @@ export default function NewEvaluation() {
 
   const addQuestion = () => {
     const newQuestion: Question = {
-      id: `q${Date.now()}`,
+      id: uuidv4(),
       type: 'rating_5',
       text: '',
       required: true,
       weight: 1.0,
       order: evaluation.questions.length + 1,
+      category: 'general',
       options: {}
     };
 
@@ -119,6 +129,15 @@ export default function NewEvaluation() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!evaluation.title.trim()) {
+      toast({
+        title: "Error",
+        description: "El título de la evaluación es obligatorio.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     if (!validateDates(evaluation.start_date, evaluation.end_date)) {
       toast({
         title: "Error",
@@ -131,8 +150,12 @@ export default function NewEvaluation() {
     setLoading(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Usar el servicio para crear la evaluación
+      const { data, error } = await createEvaluation(evaluation);
+      
+      if (error) {
+        throw error;
+      }
 
       toast({
         title: "Evaluación creada",
@@ -140,14 +163,59 @@ export default function NewEvaluation() {
       });
 
       router.push("/evaluations");
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Error al crear evaluación:", error);
       toast({
         title: "Error",
-        description: "No se pudo crear la evaluación. Por favor, intente nuevamente.",
+        description: error.message || "No se pudo crear la evaluación. Por favor, intente nuevamente.",
         variant: "destructive",
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Función para formatear las opciones de la pregunta según su tipo
+  const getQuestionOptions = (question: Question) => {
+    const questionType = questionTypes.find(type => type.id === question.type);
+    
+    switch (question.type) {
+      case 'rating_5':
+        return {
+          type: 'rating_5',
+          min_label: "Muy malo",
+          max_label: "Excelente"
+        };
+      case 'rating_10':
+        return {
+          type: 'rating_10',
+          min_label: "Muy malo",
+          max_label: "Excelente"
+        };
+      case 'yes_no':
+        return {
+          type: 'yes_no'
+        };
+      case 'multiple_choice':
+        return {
+          type: 'multiple_choice',
+          choices: ["Opción 1", "Opción 2", "Opción 3"]
+        };
+      case 'multiple_answer':
+        return {
+          type: 'multiple_answer',
+          choices: ["Opción 1", "Opción 2", "Opción 3"]
+        };
+      case 'text_short':
+        return {
+          type: 'text_short'
+        };
+      case 'text_long':
+        return {
+          type: 'text_long'
+        };
+      default:
+        return question.options;
     }
   };
 
@@ -281,6 +349,13 @@ export default function NewEvaluation() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-6">
+            {evaluation.questions.length === 0 && (
+              <div className="p-4 border rounded-lg border-dashed text-center">
+                <p className="text-muted-foreground">
+                  No hay preguntas aún. Haz clic en "Agregar Pregunta" para comenzar.
+                </p>
+              </div>
+            )}
             {evaluation.questions.map((question, index) => (
               <div key={question.id} className="p-4 border rounded-lg space-y-4">
                 <div className="flex items-center justify-between">
@@ -320,6 +395,14 @@ export default function NewEvaluation() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Categoría</Label>
+                    <Input
+                      value={question.category || ""}
+                      onChange={(e) => handleQuestionChange(index, "category", e.target.value)}
+                      placeholder="Ej: seguridad, calidad, etc."
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Peso</Label>

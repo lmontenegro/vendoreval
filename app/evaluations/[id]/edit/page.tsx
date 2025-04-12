@@ -23,8 +23,14 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/use-toast";
 import { ArrowLeft, Save, Plus, Trash2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
-import { evaluationTypes, questionTypes, mockEvaluations } from "@/lib/supabase/mock-data";
+import { evaluationTypes, questionTypes } from "@/lib/supabase/mock-data";
+import { getEvaluationDetails, updateEvaluation } from "@/lib/services/evaluation-service";
+import { v4 as uuidv4 } from 'uuid';
+
+interface AnswerOption {
+  id: string;
+  text: string;
+}
 
 interface Question {
   id: string;
@@ -33,7 +39,11 @@ interface Question {
   required: boolean;
   weight: number;
   order: number;
+  category?: string;
   options: any;
+  answerOptions?: AnswerOption[];
+  isNew?: boolean;
+  isDeleted?: boolean;
 }
 
 interface Evaluation {
@@ -52,6 +62,7 @@ interface Evaluation {
     notify_on_submit: boolean;
   };
   questions: Question[];
+  metadata?: any;
 }
 
 export default function EditEvaluation({ params }: { params: { id: string } }) {
@@ -62,17 +73,72 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     const fetchEvaluation = async () => {
-      // Mock data fetch
-      const mockEval = mockEvaluations.find(e => e.id === params.id);
-      if (mockEval) {
-        setEvaluation(mockEval);
-      } else {
+      setLoading(true);
+      try {
+        const { data, error } = await getEvaluationDetails(params.id);
+        
+        if (error || !data) {
+          throw error || new Error("No se encontró la evaluación");
+        }
+        
+        // Extraer metadatos
+        const metadata = (data as any).metadata || {};
+        
+        // Convertir los datos obtenidos al formato esperado por el componente
+        const formattedEvaluation: Evaluation = {
+          id: data.id,
+          title: data.title,
+          description: data.description,
+          status: data.status,
+          start_date: data.start_date,
+          end_date: data.end_date,
+          // Extraer los datos del metadata
+          type: metadata.type || 'performance',
+          is_anonymous: metadata.is_anonymous || false,
+          settings: metadata.settings || {
+            allow_partial_save: true,
+            require_comments: false,
+            show_progress: true,
+            notify_on_submit: true
+          },
+          // Formatear las preguntas
+          questions: (data.questions || []).map(q => {
+            // Assume choices are stored in q.options.choices
+            // Map them to answerOptions, ensuring each has a unique ID
+            const choices = q.options?.choices || [];
+            const answerOptions = choices.map((choice: any) => ({
+              // Use existing ID if available, generate one if not (or handle based on backend structure)
+              id: choice.id || uuidv4(), 
+              text: typeof choice === 'string' ? choice : choice.text || '' 
+            }));
+
+            return {
+              id: q.id,
+              type: q.options?.type || 'rating_5',
+              text: q.question_text,
+              required: q.is_required,
+              weight: q.weight,
+              order: q.order_index || 0,
+              category: q.category,
+              options: q.options || {},
+              answerOptions: answerOptions,
+              isNew: false,
+              isDeleted: false
+            };
+          })
+        };
+        
+        setEvaluation(formattedEvaluation);
+      } catch (error: any) {
+        console.error("Error cargando evaluación:", error);
         toast({
           title: "Error",
-          description: "No se encontró la evaluación",
+          description: error.message || "No se pudo cargar la evaluación",
           variant: "destructive",
         });
         router.push("/evaluations");
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -84,18 +150,28 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
 
     if (field.includes('.')) {
       const [parent, child] = field.split('.');
-      setEvaluation(prev => ({
-        ...prev!,
-        [parent]: {
-          ...(prev![parent as keyof Evaluation] as Record<string, any>),
-          [child]: value
+      setEvaluation(prev => {
+        if (!prev) return prev;
+        const parentObj = prev[parent as keyof Evaluation];
+        if (typeof parentObj === 'object' && parentObj !== null) {
+          return {
+            ...prev,
+            [parent]: {
+              ...parentObj,
+              [child]: value
+            }
+          };
         }
-      }));
+        return prev;
+      });
     } else {
-      setEvaluation(prev => ({
-        ...prev!,
-        [field as keyof Evaluation]: value
-      }));
+      setEvaluation(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          [field as keyof Evaluation]: value
+        };
+      });
     }
   };
 
@@ -103,65 +179,196 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
     if (!evaluation) return;
 
     const newQuestions = [...evaluation.questions];
-    newQuestions[index] = {
-      ...newQuestions[index],
-      [field]: value
-    };
+    
+    // Manejo especial para answerOptions para asegurar que siempre sea un array
+    if (field === 'answerOptions') {
+      newQuestions[index] = {
+        ...newQuestions[index],
+        answerOptions: Array.isArray(value) ? value : []
+      };
+    } else {
+      newQuestions[index] = {
+        ...newQuestions[index],
+        [field]: value
+      };
+      
+      // Si cambiando type, resetear answerOptions si el nuevo tipo no las necesita
+      if (field === 'type' && !['multiple_choice', 'single_choice', 'checkbox'].includes(value)) {
+          newQuestions[index].answerOptions = [];
+      }
+    }
 
-    setEvaluation(prev => ({
-      ...prev!,
-      questions: newQuestions
-    }));
+    setEvaluation(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        questions: newQuestions
+      };
+    });
   };
 
   const addQuestion = () => {
     if (!evaluation) return;
+    const defaultType = 'rating_5'; // Or perhaps 'multiple_choice' if that's more common?
+    const needsOptions = ['multiple_choice', 'single_choice', 'checkbox'].includes(defaultType);
 
     const newQuestion: Question = {
-      id: `q${Date.now()}`,
-      type: 'rating_5',
+      id: uuidv4(),
+      type: defaultType, 
       text: '',
       required: true,
       weight: 1.0,
-      order: evaluation.questions.length + 1,
-      options: {}
+      order: evaluation.questions.filter(q => !q.isDeleted).length + 1, // Correct order based on visible questions
+      category: 'general',
+      options: {}, // Keep this structure for now?
+      answerOptions: needsOptions ? [{ id: uuidv4(), text: '' }] : [], // Initialize if needed
+      isNew: true
     };
 
-    setEvaluation(prev => ({
-      ...prev!,
-      questions: [...prev!.questions, newQuestion]
-    }));
+    setEvaluation(prev => {
+      if (!prev) return prev;
+      // Append to the end, reordering happens on delete/submit if necessary
+      return {
+        ...prev,
+        questions: [...prev.questions, newQuestion] 
+      };
+    });
   };
 
   const removeQuestion = (index: number) => {
     if (!evaluation) return;
 
-    const newQuestions = evaluation.questions.filter((_, i) => i !== index);
-    setEvaluation(prev => ({
-      ...prev!,
-      questions: newQuestions
-    }));
+    const allQuestions = [...evaluation.questions];
+    const questionToRemove = allQuestions.find((q, idx) => {
+        // Find the actual question in the full list corresponding 
+        // to the visible index `index`
+        let visibleCount = 0;
+        for(let i=0; i < allQuestions.length; i++) {
+            if (!allQuestions[i].isDeleted) {
+                if (visibleCount === index) return true;
+                visibleCount++;
+            }
+        }
+        return false;
+    });
+
+    if (!questionToRemove) return; // Should not happen
+
+    // Find the real index in the full array
+    const realIndex = allQuestions.findIndex(q => q.id === questionToRemove.id);
+    
+    if (realIndex === -1) return; // Should not happen
+
+    // If it's a new question not saved yet, remove it completely
+    if (allQuestions[realIndex].isNew) {
+        allQuestions.splice(realIndex, 1);
+    } else {
+        // Otherwise, mark it as deleted
+        allQuestions[realIndex].isDeleted = true;
+    }
+
+    // Re-calculate order for visible questions
+    let currentOrder = 1;
+    const updatedQuestions = allQuestions.map(q => {
+        if (!q.isDeleted) {
+            q.order = currentOrder++;
+        }
+        return q;
+    });
+
+    setEvaluation(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        questions: updatedQuestions
+      };
+    });
+  };
+
+  const validateDates = (start: string, end: string) => {
+    if (!start || !end) return false;
+    return new Date(end) > new Date(start);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!evaluation) return;
+    
+    if (!validateDates(evaluation.start_date, evaluation.end_date)) {
+      toast({
+        title: "Error",
+        description: "La fecha de fin debe ser posterior a la fecha de inicio.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setLoading(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const questionsPayload = evaluation.questions
+        .filter(q => !(q.isNew && q.isDeleted))
+        .map(q => {
+          const needsOptions = ['multiple_choice', 'single_choice', 'checkbox'].includes(q.type);
+          
+          // Prepare options specifically for the payload
+          const payloadOptions: any = {
+            type: q.type // Siempre incluir el tipo en las opciones
+          };
+          
+          // Incluir choices solo si el tipo lo necesita y hay opciones definidas
+          if (needsOptions && q.answerOptions && q.answerOptions.length > 0) {
+            payloadOptions.choices = q.answerOptions.map(opt => ({ 
+              id: opt.id, 
+              text: opt.text 
+            }));
+          }
+
+          return {
+            // Aligning keys with the expected type from the linter error
+            id: q.id,
+            text: q.text,                 // Renamed from question_text
+            type: q.type,                 // Moved type to top level
+            required: q.required,         // Renamed from is_required
+            weight: q.weight,
+            order: q.order,               // Renamed from order_index
+            category: q.category,
+            options: payloadOptions,      // Incluir opciones con la estructura correcta
+            isNew: q.isNew && !q.isDeleted ? true : undefined,
+            isDeleted: q.isDeleted ? true : undefined,
+          };
+      });
+
+      // Now the type should better match what updateEvaluation expects
+      const { data, error } = await updateEvaluation({
+        id: evaluation.id,
+        title: evaluation.title,
+        description: evaluation.description,
+        type: evaluation.type,
+        is_anonymous: evaluation.is_anonymous,
+        settings: evaluation.settings,
+        start_date: evaluation.start_date,
+        end_date: evaluation.end_date,
+        questions: questionsPayload // Pass the correctly structured payload
+      });
+      
+      if (error) {
+        throw error;
+      }
 
       toast({
         title: "Evaluación actualizada",
         description: "Los cambios han sido guardados exitosamente.",
       });
+      
+      // Optionally refetch or update state to remove 'isNew', 'isDeleted' flags after successful save
+       router.push(`/evaluations/${evaluation.id}`); // Or refetch the data
 
-      router.push("/evaluations");
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Error al actualizar evaluación:", error);
       toast({
         title: "Error",
-        description: "No se pudo actualizar la evaluación. Por favor, intente nuevamente.",
+        description: error.message || "No se pudo actualizar la evaluación. Por favor, intente nuevamente.",
         variant: "destructive",
       });
     } finally {
@@ -169,8 +376,21 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
     }
   };
 
+  if (loading && !evaluation) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-muted-foreground">Cargando evaluación...</p>
+      </div>
+    );
+  }
+
   if (!evaluation) {
-    return <div>Cargando...</div>;
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+        <p className="text-lg">No se encontró la evaluación solicitada</p>
+        <Button onClick={() => router.push("/evaluations")}>Volver a evaluaciones</Button>
+      </div>
+    );
   }
 
   return (
@@ -185,6 +405,18 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
             <ArrowLeft className="w-4 h-4" /> Volver
           </Button>
           <h1 className="text-3xl font-bold">Editar Evaluación</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`px-2 py-1 rounded-full text-xs ${
+            evaluation.status === 'completed' ? 'bg-green-100 text-green-700' :
+            evaluation.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+            evaluation.status === 'draft' ? 'bg-yellow-100 text-yellow-700' :
+            'bg-gray-100 text-gray-700'
+          }`}>
+            {evaluation.status === 'completed' ? 'Completada' :
+             evaluation.status === 'in_progress' ? 'En Progreso' :
+             evaluation.status === 'draft' ? 'Borrador' : evaluation.status}
+          </span>
         </div>
       </div>
 
@@ -305,67 +537,149 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
             </Button>
           </CardHeader>
           <CardContent className="space-y-6">
-            {evaluation.questions.map((question, index) => (
-              <div key={question.id} className="p-4 border rounded-lg space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium">Pregunta {index + 1}</h3>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeQuestion(index)}
+            {evaluation.questions
+              .filter(q => !q.isDeleted)
+              .sort((a, b) => a.order - b.order)
+              .map((question, visibleIndex) => {
+                // Find the original index in the full array if needed for handlers
+                const originalIndex = evaluation.questions.findIndex(q => q.id === question.id);
+
+                // Determine if the current question type requires answer options
+                const needsOptions = ['multiple_choice', 'single_choice', 'checkbox'].includes(question.type);
+
+                return (
+                  <div 
+                    key={question.id}
+                    className={`p-4 border rounded-lg space-y-4 ${question.isNew ? 'border-green-300 bg-green-50' : ''}`}
                   >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>Texto de la Pregunta</Label>
-                    <Input
-                      value={question.text}
-                      onChange={(e) => handleQuestionChange(index, "text", e.target.value)}
-                      required
-                    />
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium">
+                        Pregunta {question.order}
+                        {question.isNew && <span className="ml-2 text-xs text-green-600">(Nueva)</span>}
+                      </h3>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeQuestion(visibleIndex)}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor={`q-${question.id}-text`}>Texto de la Pregunta</Label>
+                        <Input
+                          id={`q-${question.id}-text`}
+                          value={question.text}
+                          onChange={(e) => handleQuestionChange(originalIndex, "text", e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`q-${question.id}-type`}>Tipo de Pregunta</Label>
+                        <Select
+                          value={question.type}
+                          onValueChange={(value) => handleQuestionChange(originalIndex, "type", value)}
+                        >
+                          <SelectTrigger id={`q-${question.id}-type`}>
+                            <SelectValue placeholder="Seleccionar tipo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {questionTypes.map((type) => (
+                              <SelectItem key={type.id} value={type.id}>
+                                {type.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`q-${question.id}-category`}>Categoría</Label>
+                        <Input
+                          id={`q-${question.id}-category`}
+                          value={question.category || ""}
+                          onChange={(e) => handleQuestionChange(originalIndex, "category", e.target.value)}
+                          placeholder="Ej: seguridad, calidad, etc."
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`q-${question.id}-weight`}>Peso</Label>
+                        <Input
+                          id={`q-${question.id}-weight`}
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={question.weight}
+                          onChange={(e) => handleQuestionChange(originalIndex, "weight", parseFloat(e.target.value) || 0)}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between pt-4">
+                        <Label htmlFor={`q-${question.id}-required`}>Obligatoria</Label>
+                        <Switch
+                          id={`q-${question.id}-required`}
+                          checked={question.required}
+                          onCheckedChange={(checked) => handleQuestionChange(originalIndex, "required", checked)}
+                        />
+                      </div>
+
+                      {needsOptions && (
+                        <div className="space-y-3 md:col-span-2 pt-4">
+                          <Label className="font-medium">Opciones de Respuesta</Label>
+                          {question.answerOptions?.map((option, optionIndex) => (
+                            <div key={option.id} className="flex items-center gap-2">
+                              <Input
+                                value={option.text}
+                                onChange={(e) => {
+                                  const updatedOptions = [...(question.answerOptions || [])];
+                                  updatedOptions[optionIndex] = { ...option, text: e.target.value };
+                                  handleQuestionChange(originalIndex, "answerOptions", updatedOptions);
+                                }}
+                                placeholder={`Opción ${optionIndex + 1}`}
+                                required
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  const updatedOptions = [...(question.answerOptions || [])];
+                                  updatedOptions.splice(optionIndex, 1);
+                                  handleQuestionChange(originalIndex, "answerOptions", updatedOptions);
+                                }}
+                                disabled={question.answerOptions && question.answerOptions.length <= 1}
+                              >
+                                <Trash2 className="w-4 h-4 text-destructive" />
+                              </Button>
+                            </div>
+                          ))}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const updatedOptions = [...(question.answerOptions || []), { id: uuidv4(), text: '' }];
+                              handleQuestionChange(originalIndex, "answerOptions", updatedOptions);
+                            }}
+                            className="gap-1 mt-2"
+                          >
+                            <Plus className="w-3 h-3" /> Agregar Opción
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Tipo de Pregunta</Label>
-                    <Select
-                      value={question.type}
-                      onValueChange={(value) => handleQuestionChange(index, "type", value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleccionar tipo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {questionTypes.map((type) => (
-                          <SelectItem key={type.id} value={type.id}>
-                            {type.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Peso</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.1"
-                      value={question.weight}
-                      onChange={(e) => handleQuestionChange(index, "weight", parseFloat(e.target.value))}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label>Obligatoria</Label>
-                    <Switch
-                      checked={question.required}
-                      onCheckedChange={(checked) => handleQuestionChange(index, "required", checked)}
-                    />
-                  </div>
-                </div>
+                );
+              })}
+            
+            {evaluation.questions.filter(q => !q.isDeleted).length === 0 && (
+              <div className="p-4 border rounded-lg border-dashed text-center">
+                <p className="text-muted-foreground">
+                  No hay preguntas activas. Haz clic en "Agregar Pregunta" para comenzar.
+                </p>
               </div>
-            ))}
+            )}
           </CardContent>
           <CardFooter>
             <Button type="submit" disabled={loading} className="ml-auto gap-2">

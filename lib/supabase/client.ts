@@ -1,6 +1,6 @@
 "use client";
 
-import { createClient } from '@supabase/supabase-js'
+import { createClient as supabaseCreateClient } from '@supabase/supabase-js'
 import { Database } from './database.types';
 
 // Obtener variables de entorno para la conexión a Supabase
@@ -13,7 +13,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Crear y exportar el cliente de Supabase
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+export const supabase = supabaseCreateClient<Database>(supabaseUrl, supabaseAnonKey, {
     auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -24,3 +24,6 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
         fetch: fetch,
     },
 })
+
+// Re-exportar createClient para casos donde se necesita crear clientes personalizados
+export const createClient = supabaseCreateClient;

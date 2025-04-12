@@ -1,4 +1,4 @@
-import { createServerClient } from '@supabase/ssr'
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
@@ -10,8 +10,9 @@ export const config = {
          * - _next/image (image optimization files)
          * - favicon.ico (favicon file)
          * - public (public files)
+         * - api (API routes)
          */
-        '/((?!_next/static|_next/image|favicon.ico|public).*)',
+        '/((?!_next/static|_next/image|favicon.ico|public|api).*)',
     ],
 }
 
@@ -21,6 +22,7 @@ export async function middleware(request: NextRequest) {
             headers: request.headers,
         },
     })
+    const requestPath = new URL(request.url).pathname;
 
     const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -28,64 +30,46 @@ export async function middleware(request: NextRequest) {
         {
             cookies: {
                 get(name: string) {
-                    return request.cookies.get(name)?.value
+                    const cookie = request.cookies.get(name)?.value;
+                    return cookie;
                 },
-                set(name: string, value: string, options: any) {
-                    request.cookies.set({
-                        name,
-                        value,
-                        ...options,
-                    })
+                set(name: string, value: string, options: CookieOptions) {
+                    request.cookies.set({ name, value, ...options });
                     response = NextResponse.next({
-                        request: {
-                            headers: request.headers,
-                        },
-                    })
-                    response.cookies.set({
-                        name,
-                        value,
-                        ...options,
-                    })
+                        request: { headers: request.headers },
+                    });
+                    response.cookies.set({ name, value, ...options });
                 },
-                remove(name: string, options: any) {
-                    request.cookies.set({
-                        name,
-                        value: '',
-                        ...options,
-                    })
+                remove(name: string, options: CookieOptions) {
+                    request.cookies.set({ name, value: '', ...options });
                     response = NextResponse.next({
-                        request: {
-                            headers: request.headers,
-                        },
-                    })
-                    response.cookies.set({
-                        name,
-                        value: '',
-                        ...options,
-                    })
+                        request: { headers: request.headers },
+                    });
+                    response.cookies.set({ name, value: '', ...options });
                 },
             },
         }
     )
 
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+
     // Rutas protegidas que requieren autenticación
-    const protectedRoutes = ['/dashboard', '/evaluations', '/vendors', '/settings']
-
-    // Rutas de autenticación que no deberían ser accesibles si ya está autenticado
-    const authRoutes = ['/auth/login', '/auth/register', '/auth/reset-password']
-
-    const { data: { session } } = await supabase.auth.getSession()
-    const requestPath = new URL(request.url).pathname
+    const protectedRoutes = ['/dashboard', '/evaluations', '/vendors', '/settings', '/profile'];
+    const authRoutes = ['/auth/login', '/auth/register', '/auth/reset-password', '/auth/update-password'];
 
     // Si la ruta es protegida y no hay sesión, redirigir al login
-    if (protectedRoutes.some(route => requestPath.startsWith(route)) && !session) {
-        return NextResponse.redirect(new URL('/auth/login', request.url))
+    if (!session && protectedRoutes.some(route => requestPath.startsWith(route))) {
+        const redirectUrl = new URL('/auth/login', request.url);
+        redirectUrl.searchParams.set('redirectedFrom', requestPath);
+        return NextResponse.redirect(redirectUrl);
     }
 
     // Si la ruta es de autenticación y hay sesión, redirigir al dashboard
-    if (authRoutes.includes(requestPath) && session) {
-        return NextResponse.redirect(new URL('/dashboard', request.url))
+    if (session && authRoutes.includes(requestPath)) {
+        const redirectUrl = new URL('/dashboard', request.url);
+        return NextResponse.redirect(redirectUrl);
     }
 
-    return response
+    return response;
 } 
