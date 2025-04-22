@@ -1,16 +1,20 @@
-import { supabase } from '../supabase/client';
+import { SupabaseClient, createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
+import { Database } from '../database.types';
+
+type Tables = Database['public']['Tables'];
+type EvaluationStatus = Database['public']['Enums']['evaluation_status'];
 
 export interface Question {
   id: string;
   category: string;
-  subcategory?: string;
+  subcategory?: string | null;
   question_text: string;
-  description?: string;
+  description?: string | null;
   options: any;
   weight: number;
   is_required: boolean;
-  order_index?: number;
+  order_index?: number | null;
 }
 
 export interface Response {
@@ -18,20 +22,20 @@ export interface Response {
   question_id: string;
   response_value: string;
   score: number | null;
-  notes?: string;
-  evidence_urls?: string[];
-  reviewed_by?: string;
-  review_date?: string;
+  notes?: string | null;
+  evidence_urls?: string[] | null;
+  reviewed_by?: string | null;
+  review_date?: string | null;
 }
 
 export interface Evaluation {
   id: string;
   title: string;
   description: string;
-  vendor_id: string;
+  vendor_id: string | null;
   vendor_name?: string;
   evaluator_id: string;
-  status: string;
+  status: EvaluationStatus;
   progress: number;
   total_score: number | null;
   start_date: string;
@@ -40,133 +44,207 @@ export interface Evaluation {
   updated_at: string;
   questions?: Question[];
   responses?: Response[];
+  metadata?: any;
 }
 
-export async function getEvaluations(): Promise<{ data: Evaluation[] | null; error: Error | null }> {
+export interface DBQuestion extends Omit<Question, 'weight' | 'is_required'> {
+  weight: number | null;
+  is_required: boolean | null;
+}
+
+export async function getEvaluations(
+  client: SupabaseClient<Database>,
+  userId?: string
+): Promise<{ data: Evaluation[] | null; error: Error | null }> {
   try {
-    console.log("Iniciando getEvaluations");
+    console.log("[DEBUG getEvaluations] Iniciando getEvaluations");
 
-    // Obtener el usuario actual desde la sesión
-    const { data: { user } } = await supabase.auth.getUser();
+    let currentUserId: string | undefined = userId;
 
-    if (!user) {
-      console.error("No hay sesión de usuario activa");
-      throw new Error("No has iniciado sesión");
+    if (!currentUserId) {
+      try {
+        const { data, error } = await client.auth.getUser();
+
+        if (error) {
+          console.error("[DEBUG getEvaluations] Error al obtener usuario:", error);
+          throw error;
+        }
+        if (!data.user) {
+          console.error("[DEBUG getEvaluations] No hay sesión de usuario activa");
+          throw new Error("No has iniciado sesión");
+        }
+        currentUserId = data.user.id;
+        console.log("[DEBUG getEvaluations] Usuario autenticado ID:", currentUserId);
+      } catch (e) {
+        console.error("[DEBUG getEvaluations] Error al obtener usuario/sesión:", e);
+        throw new Error("Error al autenticar");
+      }
     }
 
-    console.log("Usuario autenticado:", user.id);
+    if (!currentUserId) {
+      console.error("[DEBUG getEvaluations] No se pudo determinar el ID del usuario");
+      throw new Error("No se pudo determinar el ID del usuario");
+    }
 
-    // Obtener el perfil del usuario para verificar su rol
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
+    const { data: testQuery, error: testError } = await client
+      .from('evaluations')
+      .select('id, title')
+      .limit(5);
+
+    console.log("[DEBUG getEvaluations] Test de datos en tabla:",
+      testQuery ? `Encontrados: ${testQuery.length}` : "No hay datos",
+      testError ? `Error: ${testError.message}` : "Sin errores");
+
+    const { data: userData, error: userError } = await client
+      .from('users')
+      .select('role_id, vendor_id')
+      .eq('id', currentUserId)
       .single();
 
-    if (profileError) {
-      console.error("Error al obtener perfil:", profileError);
-      throw profileError;
+    if (userError) {
+      console.error("[DEBUG getEvaluations] Error al obtener rol:", userError);
+      throw userError;
     }
 
-    console.log("Perfil de usuario:", profile);
+    if (!userData?.role_id) {
+      console.error("[DEBUG getEvaluations] Usuario sin rol asignado");
+      throw new Error("Usuario sin rol asignado");
+    }
 
-    // Construir la consulta para obtener las evaluaciones
-    let query = supabase.from('evaluations').select(`
-      id,
-      created_at,
-      updated_at,
-      evaluator_id,
-      status,
-      progress,
-      total_score,
-      start_date,
-      end_date,
-      metadata,
-      vendor_id,
-      title,
-      description,
-      vendors:vendor_id (id, name)
-    `);
+    console.log("[DEBUG getEvaluations] Datos del usuario:",
+      JSON.stringify({ role_id: userData.role_id, vendor_id: userData.vendor_id }));
 
-    // Filtrar evaluaciones según el rol del usuario
-    if (profile.role === 'supplier') {
-      console.log("Usuario es proveedor, filtrando evaluaciones");
-      // Verificar si el usuario está asociado a algún proveedor a través de vendor_users
-      const { data: vendorUsers, error: vendorError } = await supabase
-        .from('vendor_users')
-        .select('vendor_id')
-        .eq('user_id', user.id);
+    const { data: roleData, error: roleNameError } = await client
+      .from('roles')
+      .select('name')
+      .eq('id', userData.role_id)
+      .single();
 
-      if (vendorError) {
-        console.error("Error al obtener vendor_users:", vendorError);
-        throw vendorError;
-      }
+    if (roleNameError) {
+      console.error("[DEBUG getEvaluations] Error al obtener nombre del rol:", roleNameError);
+      throw roleNameError;
+    }
 
-      if (vendorUsers && vendorUsers.length > 0) {
-        // Si el usuario está asociado a uno o más proveedores, mostrar sus evaluaciones
-        const vendorIds = vendorUsers.map(vu => vu.vendor_id);
-        console.log("Filtrando por proveedores:", vendorIds);
-        query = query.in('vendor_id', vendorIds);
-      } else {
-        // Si no está asociado a ningún proveedor, no mostrar evaluaciones
-        console.log("Usuario no está asociado a ningún proveedor");
+    if (!roleData) {
+      console.error("[DEBUG getEvaluations] No se encontró el rol con ID:", userData.role_id);
+      throw new Error("Rol no encontrado");
+    }
+
+    console.log("[DEBUG getEvaluations] Rol del usuario:", roleData.name);
+
+    const query = client
+      .from('evaluations')
+      .select(`
+        id,
+        created_at,
+        updated_at,
+        evaluator_id,
+        status,
+        progress,
+        total_score,
+        start_date,
+        end_date,
+        metadata,
+        vendor_id,
+        title,
+        description,
+        vendors:vendor_id (id, name)
+      `);
+
+    let filteredQuery = query;
+    if (roleData.name.toLowerCase() !== 'admin') {
+      console.log("[DEBUG getEvaluations] Usuario no es admin, filtrando por vendor_id:", userData.vendor_id);
+
+      if (!userData.vendor_id) {
+        console.log("[DEBUG getEvaluations] Usuario no tiene vendor_id asignado");
         return { data: [], error: null };
       }
+
+      filteredQuery = query.eq('vendor_id', userData.vendor_id);
     } else {
-      console.log("Usuario es admin o evaluador, mostrando todas las evaluaciones");
+      console.log("[DEBUG getEvaluations] Usuario es admin, mostrando todas las evaluaciones");
     }
 
-    // Ejecutar la consulta
-    const { data, error } = await query;
+    const { data, error } = await filteredQuery;
 
     if (error) {
-      console.error("Error en la consulta de evaluaciones:", error);
+      console.error("[DEBUG getEvaluations] Error en la consulta:", error);
       throw error;
     }
 
-    console.log("Evaluaciones obtenidas de la BD:", data);
+    console.log("[DEBUG getEvaluations] Evaluaciones obtenidas:", data?.length || 0);
+    if (data && data.length > 0) {
+      console.log("[DEBUG getEvaluations] Primera evaluación:", JSON.stringify(data[0]));
+    } else {
+      console.log("[DEBUG getEvaluations] No se encontraron evaluaciones. Query ejecutado:",
+        roleData.name.toLowerCase() === 'admin'
+          ? "Todas las evaluaciones (sin filtro)"
+          : `Filtrado por vendor_id: ${userData.vendor_id}`
+      );
 
-    // Procesar los datos para el formato esperado
-    const processedData = data.map(evaluation => {
-      // Verificar si vendors es un arreglo o un objeto y extraer el nombre adecuadamente
+      const { data: allData, error: allError } = await client
+        .from('evaluations')
+        .select('id, title')
+        .limit(5);
+
+      console.log("[DEBUG getEvaluations] Prueba sin filtros:",
+        allData ? `Encontradas: ${allData.length}` : "No hay datos",
+        allError ? `Error: ${allError.message}` : "Sin errores");
+
+      if (allData && allData.length > 0) {
+        console.log("[DEBUG getEvaluations] Muestra de datos disponibles:", JSON.stringify(allData));
+      }
+    }
+
+    const processedData = data?.map((evaluation: any) => {
       let vendorName = 'Proveedor no asignado';
       if (evaluation.vendors) {
         if (Array.isArray(evaluation.vendors)) {
           vendorName = evaluation.vendors.length > 0 ? evaluation.vendors[0].name : 'Proveedor no asignado';
         } else {
-          // Usar una aserción de tipo para evitar el error de TypeScript
-          const vendor = evaluation.vendors as any;
-          vendorName = vendor?.name || 'Proveedor no asignado';
+          vendorName = evaluation.vendors?.name || 'Proveedor no asignado';
         }
       }
 
       return {
-        ...evaluation,
-        vendor_name: vendorName,
-        // Asegurarse de que estos campos existan aunque estén vacíos
-        questions: [],
-        responses: [],
-        // Si falta algún campo obligatorio en la interfaz, añadirlo con valor por defecto
+        id: evaluation.id,
         title: evaluation.title || 'Evaluación sin título',
         description: evaluation.description || 'Sin descripción',
+        vendor_id: evaluation.vendor_id,
+        vendor_name: vendorName,
+        evaluator_id: evaluation.evaluator_id,
+        status: evaluation.status || 'draft',
+        progress: evaluation.progress || 0,
+        total_score: evaluation.total_score,
+        start_date: evaluation.start_date || new Date().toISOString(),
+        end_date: evaluation.end_date || new Date().toISOString(),
+        created_at: evaluation.created_at || new Date().toISOString(),
+        updated_at: evaluation.updated_at || new Date().toISOString(),
+        questions: [],
+        responses: [],
+        metadata: evaluation.metadata || {}
       };
-    });
+    }) || [];
 
-    console.log("Datos procesados:", processedData);
+    console.log("[DEBUG getEvaluations] Datos procesados:", processedData.length);
     return { data: processedData, error: null };
+
   } catch (error) {
-    console.error('Error completo en getEvaluations:', error);
+    console.error('[DEBUG getEvaluations] Error completo:', error);
     return { data: null, error: error as Error };
   }
 }
 
-export async function getEvaluationDetails(evaluationId: string): Promise<{ data: Evaluation | null; error: Error | null }> {
+export async function getEvaluationDetails(
+  client: SupabaseClient<Database>,
+  evaluationId: string
+): Promise<{ data: Evaluation | null; error: Error | null }> {
   try {
-    // Obtener la evaluación
-    const { data: evaluation, error: evaluationError } = await supabase
+    const { data: evaluation, error: evaluationError } = await client
       .from('evaluations')
       .select(`
-        *,\n        vendors:vendor_id (name)
+        *,
+        vendors:vendor_id (name)
       `)
       .eq('id', evaluationId)
       .single();
@@ -174,33 +252,55 @@ export async function getEvaluationDetails(evaluationId: string): Promise<{ data
     if (evaluationError) throw evaluationError;
     if (!evaluation) throw new Error("Evaluación no encontrada");
 
-    // Obtener las preguntas filtrando por el campo 'evaluation_id' dentro del JSONB 'metadata'
-    const { data: questions, error: questionsError } = await supabase
+    const { data: dbQuestions, error: questionsError } = await client
       .from('questions')
       .select('*')
-      // Usar el operador '->>' para filtrar por el valor de 'evaluation_id' como texto
       .eq('metadata->>evaluation_id', evaluationId)
       .order('order_index', { ascending: true });
 
-    if (questionsError) {
-      console.error("Error al filtrar preguntas por metadata:", questionsError);
-      throw questionsError;
-    }
+    if (questionsError) throw questionsError;
 
-    // Obtener las respuestas para esta evaluación
-    const { data: responses, error: responsesError } = await supabase
+    const questions: Question[] = (dbQuestions || []).map((q: Tables['questions']['Row']) => ({
+      id: q.id,
+      category: q.category,
+      subcategory: q.subcategory,
+      question_text: q.question_text,
+      description: q.description,
+      options: q.options,
+      weight: q.weight || 0,
+      is_required: q.is_required || false,
+      order_index: q.order_index
+    }));
+
+    const { data: responses, error: responsesError } = await client
       .from('responses')
       .select('*')
       .eq('evaluation_id', evaluationId);
 
     if (responsesError) throw responsesError;
 
-    // Combinar datos
+    let vendorName = 'Proveedor no asignado';
+    if (evaluation.vendors) {
+      vendorName = (evaluation.vendors as any)?.name || 'Proveedor no asignado';
+    }
+
     const evaluationWithDetails: Evaluation = {
-      ...evaluation,
-      vendor_name: (evaluation.vendors as any)?.name || 'Proveedor no asignado',
-      questions: questions || [], // Usar las preguntas filtradas
-      responses: responses || []
+      id: evaluation.id,
+      title: evaluation.title || 'Evaluación sin título',
+      description: evaluation.description || 'Sin descripción',
+      vendor_id: evaluation.vendor_id,
+      vendor_name: vendorName,
+      evaluator_id: evaluation.evaluator_id,
+      status: evaluation.status || 'draft',
+      progress: evaluation.progress || 0,
+      total_score: evaluation.total_score,
+      start_date: evaluation.start_date || new Date().toISOString(),
+      end_date: evaluation.end_date || new Date().toISOString(),
+      created_at: evaluation.created_at || new Date().toISOString(),
+      updated_at: evaluation.updated_at || new Date().toISOString(),
+      questions: questions,
+      responses: responses || [],
+      metadata: evaluation.metadata || {}
     };
 
     return { data: evaluationWithDetails, error: null };
@@ -235,25 +335,34 @@ interface CreateEvaluationData {
   }[];
 }
 
-export async function createEvaluation(evaluationData: CreateEvaluationData): Promise<{ data: { id: string } | null; error: Error | null }> {
+export async function createEvaluation(
+  client: SupabaseClient<Database>,
+  evaluationData: CreateEvaluationData,
+  userId?: string
+): Promise<{ data: { id: string } | null; error: Error | null }> {
   try {
-    // Obtener el usuario actual
-    const { data: { user } } = await supabase.auth.getUser();
+    let currentUserId = userId;
 
-    if (!user) {
-      throw new Error("No has iniciado sesión");
+    if (!currentUserId) {
+      const { data: { user }, error: authError } = await client.auth.getUser();
+      if (authError) throw authError;
+      if (!user) throw new Error("No has iniciado sesión");
+      currentUserId = user.id;
+    }
+
+    if (!currentUserId) {
+      throw new Error("No se pudo determinar el ID del usuario");
     }
 
     const evaluationId = uuidv4();
 
-    // Crear la evaluación en la base de datos
-    const { error: evaluationError } = await supabase
+    const { error: evaluationError } = await client
       .from('evaluations')
       .insert({
         id: evaluationId,
         title: evaluationData.title,
         description: evaluationData.description,
-        evaluator_id: user.id,
+        evaluator_id: currentUserId,
         status: 'draft',
         progress: 0,
         start_date: new Date(evaluationData.start_date).toISOString(),
@@ -266,14 +375,11 @@ export async function createEvaluation(evaluationData: CreateEvaluationData): Pr
         }
       });
 
-    if (evaluationError) {
-      throw evaluationError;
-    }
+    if (evaluationError) throw evaluationError;
 
-    // Crear las preguntas asociadas a la evaluación
     if (evaluationData.questions.length > 0) {
       const questionsToInsert = evaluationData.questions.map(question => ({
-        id: question.id,
+        id: question.id || uuidv4(),
         question_text: question.text,
         category: question.category || 'general',
         subcategory: null,
@@ -286,11 +392,12 @@ export async function createEvaluation(evaluationData: CreateEvaluationData): Pr
         metadata: { evaluation_id: evaluationId }
       }));
 
-      const { error: questionsError } = await supabase
+      const { error: questionsError } = await client
         .from('questions')
         .insert(questionsToInsert);
 
       if (questionsError) {
+        console.error("Error insertando preguntas, evaluación creada:", evaluationId);
         throw questionsError;
       }
     }
@@ -306,15 +413,17 @@ interface UpdateEvaluationData {
   id: string;
   title: string;
   description: string;
-  type: string;
   start_date: string;
   end_date: string;
-  is_anonymous: boolean;
-  settings: {
-    allow_partial_save: boolean;
-    require_comments: boolean;
-    show_progress: boolean;
-    notify_on_submit: boolean;
+  metadata: {
+    type: string;
+    is_anonymous: boolean;
+    settings: {
+      allow_partial_save: boolean;
+      require_comments: boolean;
+      show_progress: boolean;
+      notify_on_submit: boolean;
+    };
   };
   questions: {
     id: string;
@@ -325,171 +434,210 @@ interface UpdateEvaluationData {
     order: number;
     category?: string;
     options?: any;
-    isNew?: boolean; // Para identificar preguntas nuevas
-    isDeleted?: boolean; // Para identificar preguntas a eliminar
+    answerOptions?: { id: string; text: string }[];
+    isNew?: boolean;
+    isDeleted?: boolean;
   }[];
 }
 
-export async function updateEvaluation(evaluationData: UpdateEvaluationData): Promise<{ data: { id: string } | null; error: Error | null }> {
+export async function updateEvaluation(
+  client: SupabaseClient<Database>,
+  evaluationData: UpdateEvaluationData
+): Promise<{ data: { id: string } | null; error: Error | null }> {
   try {
-    // Obtener el usuario actual
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      throw new Error("No has iniciado sesión");
+    let userId: string;
+    try {
+      const { data: { user }, error: authError } = await client.auth.getUser();
+      if (authError) throw authError;
+      if (!user) throw new Error("No has iniciado sesión");
+      userId = user.id;
+      console.log("[DEBUG updateEvaluation] Usuario autenticado ID:", userId);
+    } catch (error) {
+      console.error('[DEBUG updateEvaluation] Error de autenticación:', error);
+      throw new Error("No has iniciado sesión. Por favor, inicia sesión nuevamente.");
     }
 
-    // Verificar que el usuario sea admin
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
+    const { data: userData, error: userError } = await client
+      .from('users')
+      .select('role_id')
+      .eq('id', userId)
       .single();
 
-    if (profileError) throw profileError;
+    if (userError) throw userError;
+    if (!userData?.role_id) throw new Error('Usuario sin rol asignado');
 
-    if (profile.role !== 'admin') {
+    const { data: roleData, error: roleError } = await client
+      .from('roles')
+      .select('name')
+      .eq('id', userData.role_id)
+      .single();
+
+    if (roleError) throw roleError;
+    if (!roleData || roleData.name !== 'admin') {
+      console.error("[DEBUG updateEvaluation] Permiso denegado. Rol:", roleData?.name);
       throw new Error('No tienes permisos para editar evaluaciones');
     }
+    console.log("[DEBUG updateEvaluation] Permiso concedido. Rol:", roleData.name);
+    console.log("[DEBUG updateEvaluation] Payload recibido completo:", JSON.stringify(evaluationData, null, 2));
 
-    // Actualizar la evaluación
-    const { error: evaluationError } = await supabase
+    console.log("[DEBUG updateEvaluation] Metadata a actualizar en evaluations:", JSON.stringify(evaluationData.metadata, null, 2));
+
+    const { error: evaluationError } = await client
       .from('evaluations')
       .update({
         title: evaluationData.title,
         description: evaluationData.description,
         start_date: new Date(evaluationData.start_date).toISOString(),
         end_date: new Date(evaluationData.end_date).toISOString(),
-        metadata: {
-          type: evaluationData.type,
-          is_anonymous: evaluationData.is_anonymous,
-          settings: evaluationData.settings
-        }
+        metadata: evaluationData.metadata
       })
       .eq('id', evaluationData.id);
 
     if (evaluationError) {
-      throw evaluationError;
+      console.error("[DEBUG updateEvaluation] Error actualizando tabla evaluations:", JSON.stringify(evaluationError, null, 2));
+    } else {
+      console.log("[DEBUG updateEvaluation] Update en tabla evaluations ejecutado (puede que sin cambios si los datos eran iguales).");
     }
 
-    // Manejar las preguntas
-    // 1. Filtrar preguntas a crear, actualizar y eliminar
     const questionsToCreate = evaluationData.questions.filter(q => q.isNew && !q.isDeleted);
     const questionsToUpdate = evaluationData.questions.filter(q => !q.isNew && !q.isDeleted);
-    const questionsToDelete = evaluationData.questions.filter(q => q.isDeleted);
+    const questionsToDelete = evaluationData.questions.filter(q => q.isDeleted && !q.isNew);
 
-    // 2. Crear nuevas preguntas
+    console.log(`[DEBUG updateEvaluation] Preguntas a crear: ${questionsToCreate.length}`);
+    console.log(`[DEBUG updateEvaluation] Preguntas a actualizar: ${questionsToUpdate.length}`);
+    console.log(`[DEBUG updateEvaluation] Preguntas a eliminar: ${questionsToDelete.length}`);
+
+    let questionErrors: any[] = [];
+
     if (questionsToCreate.length > 0) {
       const newQuestions = questionsToCreate.map(question => ({
-        id: question.id,
+        id: question.id || uuidv4(),
         question_text: question.text,
         category: question.category || 'general',
-        subcategory: null,
-        description: null,
         options: formatQuestionOptions(question),
         weight: question.weight,
         is_required: question.required,
         order_index: question.order,
-        validation_rules: null,
         metadata: { evaluation_id: evaluationData.id }
       }));
-
-      const { error: createError } = await supabase
-        .from('questions')
-        .insert(newQuestions);
-
-      if (createError) throw createError;
+      console.log("[DEBUG updateEvaluation] Intentando crear preguntas:", JSON.stringify(newQuestions.map(q => ({ id: q.id, text: q.question_text })), null, 2));
+      const { error: createError } = await client.from('questions').insert(newQuestions);
+      if (createError) {
+        console.error("[DEBUG updateEvaluation] Error creando preguntas:", JSON.stringify(createError, null, 2));
+        questionErrors.push({ operation: 'create', error: createError });
+      } else {
+        console.log("[DEBUG updateEvaluation] Creación de preguntas ejecutada.");
+      }
     }
 
-    // 3. Actualizar preguntas existentes
-    for (const question of questionsToUpdate) {
-      const { error: updateError } = await supabase
-        .from('questions')
-        .update({
+    if (questionsToUpdate.length > 0) {
+      console.log("[DEBUG updateEvaluation] Intentando actualizar preguntas...");
+      for (const question of questionsToUpdate) {
+        const updatePayload = {
           question_text: question.text,
           category: question.category || 'general',
           options: formatQuestionOptions(question),
           weight: question.weight,
           is_required: question.required,
           order_index: question.order
-        })
-        .eq('id', question.id);
+        };
+        console.log(`[DEBUG updateEvaluation] Actualizando pregunta ID ${question.id}...`);
+        const { error: updateError } = await client
+          .from('questions')
+          .update(updatePayload)
+          .eq('id', question.id);
 
-      if (updateError) throw updateError;
+        if (updateError) {
+          console.error(`[DEBUG updateEvaluation] Error actualizando pregunta ${question.id}:`, JSON.stringify(updateError, null, 2));
+          questionErrors.push({ operation: 'update', questionId: question.id, error: updateError });
+        } else {
+          console.log(`[DEBUG updateEvaluation] Actualización pregunta ${question.id} ejecutada.`);
+        }
+      }
     }
 
-    // 4. Eliminar preguntas seleccionadas
     if (questionsToDelete.length > 0) {
       const questionIds = questionsToDelete.map(q => q.id);
-
-      const { error: deleteError } = await supabase
+      console.log("[DEBUG updateEvaluation] Intentando eliminar preguntas IDs:", questionIds);
+      const { error: deleteError } = await client
         .from('questions')
         .delete()
         .in('id', questionIds);
 
-      if (deleteError) throw deleteError;
+      if (deleteError) {
+        console.error("[DEBUG updateEvaluation] Error eliminando preguntas:", JSON.stringify(deleteError, null, 2));
+        questionErrors.push({ operation: 'delete', ids: questionIds, error: deleteError });
+      } else {
+        console.log("[DEBUG updateEvaluation] Eliminación de preguntas ejecutada.");
+      }
     }
 
+    if (evaluationError) {
+      throw evaluationError;
+    }
+    if (questionErrors.length > 0) {
+      console.error("[DEBUG updateEvaluation] Errores durante operaciones de preguntas:", questionErrors);
+      const errorMessages = questionErrors.map(e =>
+        `Operación ${e.operation}${e.questionId ? ' en pregunta ' + e.questionId : ''}: ${e.error.message}`
+      ).join('; \n');
+      throw new Error(`Errores al procesar preguntas: ${errorMessages}`);
+    }
+
+    console.log("[DEBUG updateEvaluation] Todas las operaciones completadas (aparentemente) sin errores lanzados.");
     return { data: { id: evaluationData.id }, error: null };
+
   } catch (error) {
-    console.error('Error updating evaluation:', error);
-    return { data: null, error: error as Error };
+    console.error('Error general capturado en updateEvaluation:', error);
+    const finalError = error instanceof Error ? error : new Error('Error desconocido al actualizar evaluación');
+    return { data: null, error: finalError };
   }
 }
 
-// Función auxiliar para formatear las opciones de la pregunta según su tipo
-function formatQuestionOptions(question: { type: string, options?: any }) {
-  // Si ya vienen opciones específicas y tiene un campo choices, respetamos esas opciones
-  if (question.options && question.options.choices) {
-    return {
-      type: question.type,
-      ...question.options
-    };
+interface AnswerOption { id: string; text: string; }
+
+function formatQuestionOptions(question: { type: string, options?: any, answerOptions?: AnswerOption[] }) {
+  const needsChoices = ['multiple_choice', 'single_choice', 'checkbox'].includes(question.type);
+  if (needsChoices && question.answerOptions && question.answerOptions.length > 0) {
+    const validChoices = question.answerOptions
+      .filter(opt => opt.text && opt.text.trim() !== '')
+      .map(opt => ({ id: opt.id || uuidv4(), text: opt.text.trim() }));
+
+    if (validChoices.length > 0) {
+      return { type: question.type, choices: validChoices };
+    } else {
+      return { type: question.type };
+    }
+  }
+
+  if (question.options && Array.isArray(question.options.choices)) {
+    const validOriginalChoices = question.options.choices
+      .map((choice: string | { id?: string; text: string }) =>
+        typeof choice === 'string' ? { id: uuidv4(), text: choice } : choice
+      )
+      .filter((opt: any) => opt && opt.text && opt.text.trim() !== '')
+      .map((opt: any) => ({ id: opt.id || uuidv4(), text: opt.text.trim() }));
+
+    if (validOriginalChoices.length > 0) {
+      return { type: question.type, choices: validOriginalChoices };
+    } else {
+      return { type: question.type };
+    }
   }
 
   switch (question.type) {
-    case 'rating_5':
-      return {
-        type: 'rating_5',
-        min_label: "Muy malo",
-        max_label: "Excelente"
-      };
-    case 'rating_10':
-      return {
-        type: 'rating_10',
-        min_label: "Muy malo",
-        max_label: "Excelente"
-      };
-    case 'yes_no':
-      return {
-        type: 'yes_no'
-      };
+    case 'rating_5': return { type: 'rating_5', min_label: "Muy malo", max_label: "Excelente" };
+    case 'rating_10': return { type: 'rating_10', min_label: "Muy malo", max_label: "Excelente" };
+    case 'yes_no': return { type: 'yes_no' };
     case 'multiple_choice':
-      // Solo usar opciones por defecto si no hay opciones personalizadas
-      return {
-        type: 'multiple_choice',
-        choices: question.options?.choices || ["Opción 1", "Opción 2", "Opción 3"]
-      };
     case 'single_choice':
-      return {
-        type: 'single_choice',
-        choices: question.options?.choices || ["Opción 1", "Opción 2", "Opción 3"]
-      };
     case 'checkbox':
-      return {
-        type: 'checkbox',
-        choices: question.options?.choices || ["Opción 1", "Opción 2", "Opción 3"]
-      };
-    case 'text_short':
-      return {
-        type: 'text_short'
-      };
-    case 'text_long':
-      return {
-        type: 'text_long'
-      };
+      return { type: question.type };
+    case 'text_short': return { type: 'text_short' };
+    case 'text_long': return { type: 'text_long' };
     default:
-      return question.options || {};
+      const originalOptions = { ...(question.options || {}) };
+      delete originalOptions.choices;
+      return { type: question.type, ...originalOptions };
   }
 }
 
@@ -500,22 +648,20 @@ export function calculateEvaluationScore(evaluation: Evaluation): number | null 
 
   if (responses.length === 0) return null;
 
-  // Si hay preguntas con sus pesos
   if (evaluation.questions && evaluation.questions.length > 0) {
     let totalWeightedScore = 0;
     let totalWeight = 0;
 
     responses.forEach(response => {
       const question = evaluation.questions?.find(q => q.id === response.question_id);
-      if (question && response.score !== null) {
+      if (question && response.score !== null && question.weight > 0) {
         totalWeightedScore += response.score * question.weight;
         totalWeight += question.weight;
       }
     });
 
-    return totalWeight > 0 ? Math.round((totalWeightedScore / totalWeight) * 100) / 100 : null;
+    return totalWeight > 0 ? Math.round((totalWeightedScore / totalWeight) * 100) / 100 : 0;
   } else {
-    // Si no hay información de preguntas, simplemente calculamos el promedio
     const sum = responses.reduce((acc, r) => acc + (r.score || 0), 0);
     return Math.round((sum / responses.length) * 100) / 100;
   }

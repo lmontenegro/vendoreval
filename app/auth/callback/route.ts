@@ -9,6 +9,8 @@ export async function GET(request: NextRequest) {
     const requestUrl = new URL(request.url)
     const code = requestUrl.searchParams.get('code')
 
+    console.log('Auth callback route hit', { hasCode: !!code })
+
     if (code) {
         const cookieStore = cookies()
         const supabase = createServerClient(
@@ -30,13 +32,32 @@ export async function GET(request: NextRequest) {
         )
 
         try {
-            await supabase.auth.exchangeCodeForSession(code)
+            const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+
+            if (error) {
+                console.error('Error exchanging code for session:', error)
+                return NextResponse.redirect(`${requestUrl.origin}/auth/login?error=callback_error`)
+            }
+
+            // Verify session was successfully created
+            console.log('Session created successfully', { hasUser: !!data?.user })
+
+            // Check if session is available
+            const { data: sessionData } = await supabase.auth.getSession()
+            if (!sessionData.session) {
+                console.error('No session available after code exchange')
+                return NextResponse.redirect(`${requestUrl.origin}/auth/login?error=no_session`)
+            }
         } catch (error) {
             console.error('Error exchanging code for session:', error)
             return NextResponse.redirect(`${requestUrl.origin}/auth/login?error=callback_error`)
         }
+    } else {
+        console.warn('No code provided in callback URL')
+        return NextResponse.redirect(`${requestUrl.origin}/auth/login?error=no_code`)
     }
 
     // URL to redirect to after sign in process completes
+    console.log('Redirecting to dashboard')
     return NextResponse.redirect(`${requestUrl.origin}/dashboard`)
 } 

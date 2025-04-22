@@ -1,78 +1,56 @@
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import { supabase } from "@/lib/supabase/client";
+import { Database } from '@/lib/database.types';
+import { SupabaseClient } from '@supabase/supabase-js';
 
-export interface Vendor {
-  id: string;
-  name: string;
-  ruc: string;
-  description: string | null;
-  services_provided: string[];
-  contact_email: string;
-  contact_phone: string;
-  address: string | null;
-  website: string | null;
-  is_active: boolean;
-  created_at: Date;
-  updated_at: Date;
-}
+export type Vendor = Database['public']['Tables']['vendors']['Row'];
 
 export interface VendorWithUsers extends Vendor {
-  users: {
-    user_id: string;
-    role: 'owner' | 'manager' | 'staff';
-    is_primary_contact: boolean;
-  }[];
+  users: Array<{
+    id: string;
+    email: string;
+    profile: {
+      id: string;
+      company_name: string;
+      contact_email: string | null;
+      contact_phone: string | null;
+    } | null;
+    role: {
+      id: string;
+      name: string;
+    } | null;
+  }>;
 }
 
 /**
  * Obtiene la lista de empresas proveedoras.
- * Solo accesible por administradores del sistema.
+ * La verificación de permisos (admin) debe hacerse ANTES.
+ * @param client Cliente Supabase (requerido)
  */
-export async function getVendors(): Promise<{ data: VendorWithUsers[] | null; error: Error | null }> {
+export async function getVendors(
+  client: SupabaseClient<Database>
+): Promise<{ data: VendorWithUsers[] | null; error: Error | null }> {
   try {
-    // Usar el cliente de Supabase importado para mantener consistencia con el resto de la aplicación
-    // en lugar de crear una nueva instancia con createClientComponentClient
-
-    // Verificar si el usuario está autenticado y es admin
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError) throw authError;
-
-    if (!user) {
-      throw new Error("No has iniciado sesión");
-    }
-
-    const { data: userRole } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    if (!userRole) {
-      throw new Error("No se encontró información del usuario");
-    }
-
-    if (userRole.role !== 'admin') {
-      throw new Error('No tienes permisos para ver la lista de proveedores');
-    }
+    // La verificación de permisos ya no se hace aquí
 
     // Obtener vendors con sus usuarios asociados
-    const { data: vendors, error: vendorsError } = await supabase
+    const { data: vendors, error: vendorsError } = await client
       .from('vendors')
       .select(`
-        *,
-        vendor_users (
-          user_id,
-          role,
-          is_primary_contact
-        )
-      `);
+                *,
+                users!users_vendor_id_fkey (
+                    id,
+                    email,
+                    profile:profiles!users_profile_id_fkey (*),
+                    role:roles!users_role_id_fkey (*)
+                )
+            `);
 
     if (vendorsError) throw vendorsError;
 
     // Transformar los datos al formato esperado
-    const vendorsWithUsers = vendors.map(vendor => ({
+    // Asegurarse que `users` existe y es un array
+    const vendorsWithUsers = (vendors || []).map((vendor: any) => ({
       ...vendor,
-      users: vendor.vendor_users || []
+      users: vendor.users || []
     }));
 
     return { data: vendorsWithUsers, error: null };
@@ -87,56 +65,41 @@ export async function getVendors(): Promise<{ data: VendorWithUsers[] | null; er
 
 /**
  * Obtiene un proveedor específico por ID.
- * Solo accesible por administradores o usuarios asociados al proveedor.
+ * La verificación de permisos (admin o usuario asociado) debe hacerse ANTES.
+ * @param client Cliente Supabase (requerido)
+ * @param vendorId ID del proveedor
  */
-export async function getVendorById(vendorId: string): Promise<{ data: VendorWithUsers | null; error: Error | null }> {
+export async function getVendorById(
+  client: SupabaseClient<Database>,
+  vendorId: string
+): Promise<{ data: VendorWithUsers | null; error: Error | null }> {
   try {
-    // Usar el cliente importado en lugar de crear una nueva instancia
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError) throw authError;
-
-    if (!user) {
-      throw new Error("No has iniciado sesión");
-    }
+    // La verificación de permisos ya no se hace aquí
 
     // Obtener el vendor con sus usuarios asociados
-    const { data: vendor, error: vendorError } = await supabase
+    const { data: vendor, error: vendorError } = await client
       .from('vendors')
       .select(`
-        *,
-        vendor_users (
-          user_id,
-          role,
-          is_primary_contact
-        )
-      `)
+                *,
+                users!users_vendor_id_fkey (
+                    id,
+                    email,
+                    profile:profiles!users_profile_id_fkey (*),
+                    role:roles!users_role_id_fkey (*)
+                )
+            `)
       .eq('id', vendorId)
       .single();
 
     if (vendorError) throw vendorError;
+    if (!vendor) throw new Error('Proveedor no encontrado'); // Manejar caso no encontrado
 
-    // Verificar permisos
-    const { data: userRole } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    if (!userRole) {
-      throw new Error("No se encontró información del usuario");
-    }
-
-    const isAdmin = userRole.role === 'admin';
-    const isAssociatedUser = vendor.vendor_users.some((vu: { user_id: string }) => vu.user_id === user.id);
-
-    if (!isAdmin && !isAssociatedUser) {
-      throw new Error('No tienes permisos para ver este proveedor');
-    }
-
+    // Transformar datos
+    const vendorData = vendor as any;
     return {
       data: {
-        ...vendor,
-        users: vendor.vendor_users || []
+        ...vendorData,
+        users: vendorData.users || []
       },
       error: null
     };
@@ -151,36 +114,25 @@ export async function getVendorById(vendorId: string): Promise<{ data: VendorWit
 
 /**
  * Actualiza la información de un proveedor
+ * La verificación de permisos (admin) debe hacerse ANTES.
+ * @param client Cliente Supabase (requerido)
  * @param vendorId ID del proveedor a actualizar
  * @param vendorData Datos a actualizar
  */
-export async function updateVendor(vendorId: string, vendorData: Partial<Vendor>): Promise<{ success: boolean; error: Error | null }> {
+export async function updateVendor(
+  client: SupabaseClient<Database>,
+  vendorId: string,
+  vendorData: Partial<Omit<Vendor, 'id' | 'created_at' | 'updated_at'>>
+): Promise<{ success: boolean; error: Error | null }> {
   try {
-    // Verificar si el usuario está autenticado y es admin
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError) throw authError;
+    // La verificación de permisos ya no se hace aquí
 
-    if (!user) {
-      throw new Error("No has iniciado sesión");
-    }
-
-    const { data: userRole } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    if (!userRole) {
-      throw new Error("No se encontró información del usuario");
-    }
-
-    // Solo administradores pueden actualizar proveedores
-    if (userRole.role !== 'admin') {
-      throw new Error('No tienes permisos para actualizar proveedores');
-    }
+    // ---- AÑADIR ESTE LOG ----
+    console.log("Service (updateVendor): Datos recibidos para actualizar:", JSON.stringify(vendorData, null, 2));
+    // ---- FIN LOG ----
 
     // Actualizar el proveedor
-    const { error } = await supabase
+    const { error } = await client
       .from('vendors')
       .update({
         ...vendorData,

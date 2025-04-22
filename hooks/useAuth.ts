@@ -48,17 +48,31 @@ export const useAuth = () => {
 
             if (error) throw error
 
-            // Obtener el perfil del usuario
+            // Obtener el perfil del usuario con su rol
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
-                .select('*')
+                .select(`
+                    *,
+                    roles:role_id (
+                        id,
+                        name
+                    )
+                `)
                 .eq('id', data.user.id)
                 .single()
 
-            if (profileError) throw profileError
+            if (profileError) {
+                console.error('Error getting profile:', profileError.message)
+                throw new Error('No se encontró información del usuario. Contacte al administrador.')
+            }
+
+            // Verificar si el perfil está activo
+            if (profile.is_active === false) {
+                throw new Error('Su cuenta ha sido desactivada. Contacte al administrador.')
+            }
 
             router.push('/dashboard')
-            return { data, profile }
+            return { data }
         } catch (err: any) {
             setError(err.message)
             return { error: err.message }

@@ -1,29 +1,24 @@
 "use client";
 
-import { createClient as supabaseCreateClient } from '@supabase/supabase-js'
-import { Database } from './database.types';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { Database } from '../database.types';
 
-// Obtener variables de entorno para la conexión a Supabase
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+/**
+ * Cliente de Supabase para componentes del lado del cliente.
+ * Configurado para usar autenticación basada en cookies.
+ */
+export const createClient = () => {
+    return createClientComponentClient<Database>({
+        cookieOptions: {
+            name: 'sb-pagveoabnaiztudqglvh-auth-token', // Nombre específico de la cookie
+            domain: typeof window !== 'undefined' ? window.location.hostname : '',
+            path: '/',
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production'
+        }
+    });
+};
 
-// Verificar que las variables de entorno estén definidas
-if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('Error: Supabase URL or Anonymous Key is not defined in environment variables')
-}
-
-// Crear y exportar el cliente de Supabase
-export const supabase = supabaseCreateClient<Database>(supabaseUrl, supabaseAnonKey, {
-    auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    },
-    global: {
-        fetch: fetch,
-    },
-})
-
-// Re-exportar createClient para casos donde se necesita crear clientes personalizados
-export const createClient = supabaseCreateClient;
+// Cliente por defecto para uso directo
+export const supabase = createClient();
