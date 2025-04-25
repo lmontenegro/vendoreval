@@ -626,6 +626,61 @@ export type Database = {
         }
         Relationships: []
       }
+      evaluation_vendors: {
+        Row: {
+          id: string
+          evaluation_id: string
+          vendor_id: string
+          assigned_at: string
+          assigned_by: string | null
+          status: string | null
+          completed_at: string | null
+          metadata: Json | null
+        }
+        Insert: {
+          id?: string
+          evaluation_id: string
+          vendor_id: string
+          assigned_at?: string
+          assigned_by?: string | null
+          status?: string | null
+          completed_at?: string | null
+          metadata?: Json | null
+        }
+        Update: {
+          id?: string
+          evaluation_id?: string
+          vendor_id?: string
+          assigned_at?: string
+          assigned_by?: string | null
+          status?: string | null
+          completed_at?: string | null
+          metadata?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "evaluation_vendors_evaluation_id_fkey"
+            columns: ["evaluation_id"]
+            isOneToOne: false
+            referencedRelation: "evaluations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evaluation_vendors_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evaluation_vendors_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       admin_users_cache: {

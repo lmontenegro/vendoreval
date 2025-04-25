@@ -7,6 +7,9 @@ const sessionCache = new Map();
 const SESSION_CACHE_TTL = 10 * 1000; // 10 segundos
 
 export async function middleware(req: NextRequest) {
+    // Crear respuesta predeterminada
+    const res = NextResponse.next();
+
     // Rutas que no requieren verificación de sesión (para reducir llamadas a Supabase)
     const publicRoutes = [
         '/',
@@ -26,11 +29,14 @@ export async function middleware(req: NextRequest) {
         req.nextUrl.pathname.startsWith('/assets')
     );
 
+    // Si es una API para obtener información básica de proveedores, verificar autenticación pero no permisos
+    if (req.nextUrl.pathname === '/api/evaluations/vendors') {
+        return validateApiAccess(req);
+    }
+
     if (isPublicRoute) {
         return NextResponse.next();
     }
-
-    const res = NextResponse.next();
 
     // Verificar si tenemos una sesión en caché para esta cookie
     const cookieHeader = req.headers.get('cookie') || '';
@@ -123,6 +129,41 @@ export async function middleware(req: NextRequest) {
     }
 }
 
+// Función auxiliar para validar acceso a APIs que solo requieren autenticación
+async function validateApiAccess(req: NextRequest) {
+    try {
+        const supabase = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            {
+                cookies: {
+                    get(name: string) {
+                        return req.cookies.get(name)?.value;
+                    },
+                    set() { }, // No-op para APIs
+                    remove() { } // No-op para APIs
+                },
+            }
+        );
+
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+            return NextResponse.json(
+                { error: 'No has iniciado sesión' },
+                { status: 401 }
+            );
+        }
+
+        return NextResponse.next();
+    } catch (error) {
+        return NextResponse.json(
+            { error: 'Error de autenticación' },
+            { status: 401 }
+        );
+    }
+}
+
 // Función helper para manejar las rutas protegidas
 function handleProtectedRoutes(req: NextRequest, res: NextResponse, session: any) {
     // Rutas protegidas que requieren autenticación
@@ -137,13 +178,30 @@ function handleProtectedRoutes(req: NextRequest, res: NextResponse, session: any
         '/settings'
     ];
 
+    // API routes específicas que requieren autenticación
+    const protectedApiRoutes = [
+        '/api/evaluations',
+        '/api/vendors',
+        '/api/users',
+        '/api/metrics'
+    ];
+
     // Verificar si la ruta actual está protegida
     const isProtectedRoute = protectedRoutes.some(route =>
+        req.nextUrl.pathname.startsWith(route)
+    ) || protectedApiRoutes.some(route =>
         req.nextUrl.pathname.startsWith(route)
     );
 
     // Si es una ruta protegida y no hay sesión, redirigir al login
     if (isProtectedRoute && !session) {
+        // Para APIs devolver error 401
+        if (req.nextUrl.pathname.startsWith('/api/')) {
+            return NextResponse.json(
+                { error: 'No has iniciado sesión' },
+                { status: 401 }
+            );
+        }
         return NextResponse.redirect(new URL('/auth/login', req.url));
     }
 

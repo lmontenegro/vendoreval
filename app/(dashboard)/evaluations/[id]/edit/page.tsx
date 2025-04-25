@@ -25,6 +25,9 @@ import { useToast } from "@/components/ui/use-toast";
 import { ArrowLeft, Save, Plus, Trash2 } from "lucide-react";
 import { evaluationTypes, questionTypes } from "@/lib/supabase/mock-data";
 import { v4 as uuidv4 } from 'uuid';
+import { VendorSelector } from "@/components/evaluations/VendorSelector";
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { Database } from '@/lib/database.types';
 
 interface AnswerOption {
   id: string;
@@ -54,6 +57,7 @@ interface Evaluation {
   end_date: string;
   status: string;
   is_anonymous: boolean;
+  vendor_ids?: string[];
   settings: {
     allow_partial_save: boolean;
     require_comments: boolean;
@@ -68,12 +72,31 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
+  const [evaluation, setEvaluation] = useState<Evaluation>({
+    id: params.id,
+    title: "",
+    description: "",
+    type: "performance",
+    start_date: "",
+    end_date: "",
+    status: "draft",
+    is_anonymous: false,
+    vendor_ids: [],
+    settings: {
+      allow_partial_save: true,
+      require_comments: false,
+      show_progress: true,
+      notify_on_submit: true
+    },
+    questions: []
+  });
 
   useEffect(() => {
     const fetchEvaluation = async () => {
       setLoading(true);
       try {
+        const supabase = createClientComponentClient<Database>();
+
         // Usar fetch para llamar a la API en lugar de getEvaluationDetails
         const response = await fetch(`/api/evaluations/${params.id}`);
         if (!response.ok) {
@@ -104,6 +127,26 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
         // Extraer metadatos
         const metadata = data.metadata || {};
         
+        // Get assigned vendors
+        let vendorIds: string[] = [];
+        try {
+          const { data: assignedVendors, error: vendorsError } = await supabase
+            .from('evaluation_vendors')
+            .select('vendor_id')
+            .eq('evaluation_id', params.id);
+
+          if (vendorsError) {
+            console.error("Error fetching assigned vendors:", vendorsError);
+            // Si hay un error, mantenemos el array vacío para vendorIds
+          } else {
+            // Solo mapear si no hay error y assignedVendors existe
+            vendorIds = assignedVendors?.map((v: { vendor_id: string }) => v.vendor_id) || [];
+          }
+        } catch (error) {
+          console.error("Exception fetching assigned vendors:", error);
+          // Mantener el array vacío en caso de excepción
+        }
+
         // Convertir los datos obtenidos al formato esperado por el componente
         const formattedEvaluation: Evaluation = {
           id: data.id,
@@ -112,6 +155,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
           status: data.status,
           start_date: data.start_date,
           end_date: data.end_date,
+          vendor_ids: vendorIds, // Usar el array definido arriba, que estará vacío si hubo error
           // Extraer los datos del metadata
           type: metadata.type || 'performance',
           is_anonymous: metadata.is_anonymous || false,
@@ -310,6 +354,13 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
     return new Date(end) > new Date(start);
   };
 
+  const handleVendorSelect = (vendorIds: string[]) => {
+    setEvaluation(prev => ({
+      ...prev,
+      vendor_ids: vendorIds
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     // Log inicial para depurar error extraño
     console.log("[handleSubmit] Se inició el submit. Evento:", e);
@@ -362,17 +413,18 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
           };
       });
 
-      // Crear el payload para la API
-      const updatePayload = {
+      // Construir el payload para la API
+      const payload = {
         id: evaluation.id,
         title: evaluation.title,
         description: evaluation.description,
         start_date: evaluation.start_date,
         end_date: evaluation.end_date,
+        vendor_ids: evaluation.vendor_ids,
         metadata: {
-            type: evaluation.type,
-            is_anonymous: evaluation.is_anonymous,
-            settings: evaluation.settings
+          type: evaluation.type,
+          is_anonymous: evaluation.is_anonymous,
+          settings: evaluation.settings
         },
         questions: questionsPayload
       };
@@ -383,7 +435,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(updatePayload),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -443,17 +495,18 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+    <div className="container py-8">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
           <Button
-            variant="ghost"
+            variant="outline"
+            size="icon"
             onClick={() => router.back()}
-            className="gap-2"
+            aria-label="Volver"
           >
-            <ArrowLeft className="w-4 h-4" /> Volver
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h1 className="text-3xl font-bold">Editar Evaluación</h1>
+          <h1 className="text-2xl font-bold">Editar Evaluación</h1>
         </div>
         <div className="flex items-center gap-2">
           <span className={`px-2 py-1 rounded-full text-xs ${
@@ -530,6 +583,14 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
                   value={evaluation.end_date.slice(0, 16)}
                   onChange={(e) => handleChange("end_date", e.target.value)}
                   required
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="vendors">Proveedores</Label>
+                <VendorSelector
+                  selectedVendorIds={evaluation.vendor_ids || []}
+                  onSelect={handleVendorSelect}
+                  disabled={loading}
                 />
               </div>
             </div>
@@ -725,7 +786,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
             {evaluation.questions.filter(q => !q.isDeleted).length === 0 && (
               <div className="p-4 border rounded-lg border-dashed text-center">
                 <p className="text-muted-foreground">
-                  No hay preguntas activas. Haz clic en "Agregar Pregunta" para comenzar.
+                  No hay preguntas activas. Haz clic en Agregar Pregunta para comenzar.
                 </p>
               </div>
             )}

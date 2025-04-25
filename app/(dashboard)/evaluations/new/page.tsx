@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,7 @@ import { ArrowLeft, Save, Plus, Trash2 } from "lucide-react";
 import { evaluationTypes, questionTypes } from "@/lib/supabase/mock-data";
 import { createEvaluation } from "@/lib/services/evaluation-service";
 import { v4 as uuidv4 } from 'uuid';
+import { VendorSelector } from "@/components/evaluations/VendorSelector";
 
 // --- Interfaces Locales (Asegurarse que coincidan con el estado) ---
 interface AnswerOption {
@@ -63,6 +64,7 @@ interface Evaluation {
     show_progress: boolean;
     notify_on_submit: boolean;
   };
+  vendor_ids: string[];
   questions: Question[];
   metadata?: any;
 }
@@ -84,6 +86,7 @@ export default function NewEvaluation() {
       show_progress: true,
       notify_on_submit: true
     },
+    vendor_ids: [] as string[],
     questions: [] as Question[]
   });
 
@@ -155,6 +158,16 @@ export default function NewEvaluation() {
     return new Date(end) > new Date(start);
   };
 
+  const handleVendorSelect = (vendorIds: string[]) => {
+    // Garantizar que vendor_ids es siempre un array válido
+    const validIds = Array.isArray(vendorIds) ? vendorIds : [];
+
+    setEvaluation(prev => ({
+      ...prev,
+      vendor_ids: validIds
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -188,6 +201,7 @@ export default function NewEvaluation() {
         end_date: evaluation.end_date,
         is_anonymous: evaluation.is_anonymous,
         settings: evaluation.settings,
+        vendor_ids: evaluation.vendor_ids,
         questions: evaluation.questions
           .filter(q => !q.isDeleted) // No enviar preguntas marcadas para borrar si son nuevas
           .map(q => {
@@ -325,17 +339,25 @@ export default function NewEvaluation() {
     }
   };
 
+  // Agregar useEffect para debugging
+  useEffect(() => {
+    console.log('vendor_ids actualizado:', evaluation.vendor_ids);
+  }, [evaluation.vendor_ids]);
+
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          onClick={() => router.back()}
-          className="gap-2"
-        >
-          <ArrowLeft className="w-4 h-4" /> Volver
-        </Button>
-        <h1 className="text-3xl font-bold">Nueva Evaluación</h1>
+    <div className="container py-8">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => router.back()}
+            aria-label="Volver"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-2xl font-bold">Nueva Evaluación</h1>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -349,9 +371,9 @@ export default function NewEvaluation() {
                 <Label htmlFor="title">Título</Label>
                 <Input
                   id="title"
-                  required
                   value={evaluation.title}
                   onChange={(e) => handleChange("title", e.target.value)}
+                  required
                 />
               </div>
               <div className="space-y-2">
@@ -385,7 +407,7 @@ export default function NewEvaluation() {
                 <Label htmlFor="start_date">Fecha de Inicio</Label>
                 <Input
                   id="start_date"
-                  type="datetime-local"
+                  type="date"
                   value={evaluation.start_date}
                   onChange={(e) => handleChange("start_date", e.target.value)}
                   required
@@ -395,11 +417,23 @@ export default function NewEvaluation() {
                 <Label htmlFor="end_date">Fecha de Fin</Label>
                 <Input
                   id="end_date"
-                  type="datetime-local"
+                  type="date"
                   value={evaluation.end_date}
                   onChange={(e) => handleChange("end_date", e.target.value)}
                   required
                 />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Asignar Proveedores</Label>
+                <VendorSelector
+                  selectedVendorIds={evaluation.vendor_ids || []}
+                  onSelect={handleVendorSelect}
+                  adminMode={false}
+                  disabled={loading}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Selecciona los proveedores que participarán en esta evaluación
+                </p>
               </div>
             </div>
           </CardContent>
@@ -458,7 +492,7 @@ export default function NewEvaluation() {
             {evaluation.questions.length === 0 && (
               <div className="p-4 border rounded-lg border-dashed text-center">
                 <p className="text-muted-foreground">
-                  No hay preguntas aún. Haz clic en "Agregar Pregunta" para comenzar.
+                  No hay preguntas aún. Haz clic en Agregar Pregunta para comenzar.
                 </p>
               </div>
             )}

@@ -34,6 +34,11 @@ export interface Evaluation {
   description: string;
   vendor_id: string | null;
   vendor_name?: string;
+  vendors?: Array<{
+    id: string;
+    name: string;
+    status?: string;
+  }>;
   evaluator_id: string;
   status: EvaluationStatus;
   progress: number;
@@ -226,6 +231,29 @@ export async function getEvaluations(
       };
     }) || [];
 
+    // For each evaluation, get the assigned vendors
+    for (const evaluation of processedData) {
+      const { data: assignedVendors, error: vendorsError } = await client
+        .from('evaluation_vendors')
+        .select(`
+          vendor_id,
+          status,
+          vendors:vendor_id (id, name)
+        `)
+        .eq('evaluation_id', evaluation.id);
+
+      if (vendorsError) {
+        console.error(`Error obteniendo proveedores asignados para evaluación ${evaluation.id}:`, vendorsError);
+        continue;
+      }
+
+      evaluation.vendors = (assignedVendors || []).map(av => ({
+        id: av.vendors.id,
+        name: av.vendors.name,
+        status: av.status
+      }));
+    }
+
     console.log("[DEBUG getEvaluations] Datos procesados:", processedData.length);
     return { data: processedData, error: null };
 
@@ -251,6 +279,20 @@ export async function getEvaluationDetails(
 
     if (evaluationError) throw evaluationError;
     if (!evaluation) throw new Error("Evaluación no encontrada");
+
+    // Get assigned vendors
+    const { data: assignedVendors, error: vendorsError } = await client
+      .from('evaluation_vendors')
+      .select(`
+        vendor_id,
+        status,
+        vendors:vendor_id (id, name)
+      `)
+      .eq('evaluation_id', evaluationId);
+
+    if (vendorsError) {
+      console.error("Error obteniendo proveedores asignados:", vendorsError);
+    }
 
     const { data: dbQuestions, error: questionsError } = await client
       .from('questions')
@@ -284,12 +326,20 @@ export async function getEvaluationDetails(
       vendorName = (evaluation.vendors as any)?.name || 'Proveedor no asignado';
     }
 
+    // Format assigned vendors
+    const vendors = (assignedVendors || []).map(av => ({
+      id: av.vendors.id,
+      name: av.vendors.name,
+      status: av.status
+    }));
+
     const evaluationWithDetails: Evaluation = {
       id: evaluation.id,
       title: evaluation.title || 'Evaluación sin título',
       description: evaluation.description || 'Sin descripción',
       vendor_id: evaluation.vendor_id,
       vendor_name: vendorName,
+      vendors: vendors,
       evaluator_id: evaluation.evaluator_id,
       status: evaluation.status || 'draft',
       progress: evaluation.progress || 0,
@@ -323,6 +373,7 @@ interface CreateEvaluationData {
     show_progress: boolean;
     notify_on_submit: boolean;
   };
+  vendor_ids?: string[]; // Array of vendor IDs to assign
   questions: {
     id: string;
     type: string;
@@ -402,6 +453,25 @@ export async function createEvaluation(
       }
     }
 
+    // If vendors are specified, assign them to the evaluation
+    if (evaluationData.vendor_ids && evaluationData.vendor_ids.length > 0) {
+      const vendorAssignments = evaluationData.vendor_ids.map(vendorId => ({
+        evaluation_id: evaluationId,
+        vendor_id: vendorId,
+        assigned_by: currentUserId,
+        assigned_at: new Date().toISOString()
+      }));
+
+      const { error: assignmentError } = await client
+        .from('evaluation_vendors')
+        .insert(vendorAssignments);
+
+      if (assignmentError) {
+        console.error("Error asignando proveedores a la evaluación:", assignmentError);
+        throw assignmentError;
+      }
+    }
+
     return { data: { id: evaluationId }, error: null };
   } catch (error) {
     console.error('Error creating evaluation:', error);
@@ -425,6 +495,7 @@ interface UpdateEvaluationData {
       notify_on_submit: boolean;
     };
   };
+  vendor_ids?: string[]; // Array of vendor IDs to assign
   questions: {
     id: string;
     type: string;
@@ -497,6 +568,58 @@ export async function updateEvaluation(
       console.error("[DEBUG updateEvaluation] Error actualizando tabla evaluations:", JSON.stringify(evaluationError, null, 2));
     } else {
       console.log("[DEBUG updateEvaluation] Update en tabla evaluations ejecutado (puede que sin cambios si los datos eran iguales).");
+    }
+
+    // Update vendor assignments if specified
+    if (evaluationData.vendor_ids) {
+      // First, get current assignments
+      const { data: currentAssignments, error: getAssignmentsError } = await client
+        .from('evaluation_vendors')
+        .select('vendor_id')
+        .eq('evaluation_id', evaluationData.id);
+
+      if (getAssignmentsError) {
+        console.error("[DEBUG updateEvaluation] Error obteniendo asignaciones actuales:", getAssignmentsError);
+        throw getAssignmentsError;
+      }
+
+      // Identify vendors to add and remove
+      const currentVendorIds = (currentAssignments || []).map(a => a.vendor_id);
+      const vendorsToAdd = evaluationData.vendor_ids.filter(id => !currentVendorIds.includes(id));
+      const vendorsToRemove = currentVendorIds.filter(id => !evaluationData.vendor_ids.includes(id));
+
+      // Remove unselected vendors
+      if (vendorsToRemove.length > 0) {
+        const { error: removeError } = await client
+          .from('evaluation_vendors')
+          .delete()
+          .eq('evaluation_id', evaluationData.id)
+          .in('vendor_id', vendorsToRemove);
+
+        if (removeError) {
+          console.error("[DEBUG updateEvaluation] Error eliminando asignaciones:", removeError);
+          throw removeError;
+        }
+      }
+
+      // Add new vendors
+      if (vendorsToAdd.length > 0) {
+        const vendorAssignments = vendorsToAdd.map(vendorId => ({
+          evaluation_id: evaluationData.id,
+          vendor_id: vendorId,
+          assigned_by: userId,
+          assigned_at: new Date().toISOString()
+        }));
+
+        const { error: addError } = await client
+          .from('evaluation_vendors')
+          .insert(vendorAssignments);
+
+        if (addError) {
+          console.error("[DEBUG updateEvaluation] Error añadiendo asignaciones:", addError);
+          throw addError;
+        }
+      }
     }
 
     const questionsToCreate = evaluationData.questions.filter(q => q.isNew && !q.isDeleted);
@@ -664,5 +787,76 @@ export function calculateEvaluationScore(evaluation: Evaluation): number | null 
   } else {
     const sum = responses.reduce((acc, r) => acc + (r.score || 0), 0);
     return Math.round((sum / responses.length) * 100) / 100;
+  }
+}
+
+// Function to assign vendors to an evaluation
+export async function assignVendorsToEvaluation(
+  client: SupabaseClient<Database>,
+  evaluationId: string,
+  vendorIds: string[]
+): Promise<{ success: boolean; error: Error | null }> {
+  try {
+    // Get the authenticated user
+    const { data: { user }, error: authError } = await client.auth.getUser();
+    if (authError) throw authError;
+    if (!user) throw new Error("No has iniciado sesión");
+
+    // Get current assignments
+    const { data: currentAssignments, error: getAssignmentsError } = await client
+      .from('evaluation_vendors')
+      .select('vendor_id')
+      .eq('evaluation_id', evaluationId);
+
+    if (getAssignmentsError) {
+      console.error("Error obteniendo asignaciones actuales:", getAssignmentsError);
+      throw getAssignmentsError;
+    }
+
+    // Identify vendors to add and remove
+    const currentVendorIds = (currentAssignments || []).map(a => a.vendor_id);
+    const vendorsToAdd = vendorIds.filter(id => !currentVendorIds.includes(id));
+    const vendorsToRemove = currentVendorIds.filter(id => !vendorIds.includes(id));
+
+    // Remove unselected vendors
+    if (vendorsToRemove.length > 0) {
+      const { error: removeError } = await client
+        .from('evaluation_vendors')
+        .delete()
+        .eq('evaluation_id', evaluationId)
+        .in('vendor_id', vendorsToRemove);
+
+      if (removeError) {
+        console.error("Error eliminando asignaciones:", removeError);
+        throw removeError;
+      }
+    }
+
+    // Add new vendors
+    if (vendorsToAdd.length > 0) {
+      const vendorAssignments = vendorsToAdd.map(vendorId => ({
+        evaluation_id: evaluationId,
+        vendor_id: vendorId,
+        assigned_by: user.id,
+        assigned_at: new Date().toISOString()
+      }));
+
+      const { error: addError } = await client
+        .from('evaluation_vendors')
+        .insert(vendorAssignments);
+
+      if (addError) {
+        console.error("Error añadiendo asignaciones:", addError);
+        throw addError;
+      }
+    }
+
+    return { success: true, error: null };
+  } catch (error) {
+    console.error("Error asignando proveedores a evaluación:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error('Error desconocido al asignar proveedores')
+    };
   }
 }
