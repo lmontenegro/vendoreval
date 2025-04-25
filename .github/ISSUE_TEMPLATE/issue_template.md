@@ -1,9 +1,10 @@
 ---
 name: Nueva Issue
-description: Plantilla para generar una nueva issue.
-title: 'Título de la Issue'
+about: Descripción
+title: Título de la Issue
 labels: ''
-assignees: ''
+assignees: lmontenegro
+
 ---
 
 ⚠️ **Descripción del problema**  
