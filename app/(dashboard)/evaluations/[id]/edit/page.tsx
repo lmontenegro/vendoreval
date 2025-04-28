@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +25,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { ArrowLeft, Save, Plus, Trash2 } from "lucide-react";
 import { evaluationTypes, questionTypes } from "@/lib/supabase/mock-data";
 import { v4 as uuidv4 } from 'uuid';
-import { VendorSelector } from "@/components/evaluations/VendorSelector";
+import { VendorSelectorContainer } from "@/components/evaluations/VendorSelectorContainer";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Database } from '@/lib/database.types';
 
@@ -72,6 +72,10 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+
+  // Referencia para almacenar temporalmente los IDs de proveedores seleccionados
+  const selectedVendorIdsRef = useRef<string[]>([]);
+
   const [evaluation, setEvaluation] = useState<Evaluation>({
     id: params.id,
     title: "",
@@ -146,6 +150,9 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
           console.error("Exception fetching assigned vendors:", error);
           // Mantener el array vacío en caso de excepción
         }
+
+        // Inicializar la referencia con los vendor IDs iniciales
+        selectedVendorIdsRef.current = [...vendorIds];
 
         // Convertir los datos obtenidos al formato esperado por el componente
         const formattedEvaluation: Evaluation = {
@@ -355,77 +362,40 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
   };
 
   const handleVendorSelect = (vendorIds: string[]) => {
-    setEvaluation(prev => ({
-      ...prev,
-      vendor_ids: vendorIds
-    }));
+    // Solo almacenar los IDs en la referencia sin efectos secundarios
+    // Garantizar que vendorIds es un array válido
+    const validIds = Array.isArray(vendorIds)
+      ? vendorIds.filter(id => typeof id === 'string' && id.trim() !== '')
+      : [];
+
+    // Actualizar la referencia silenciosamente sin modificar el estado
+    selectedVendorIdsRef.current = validIds;
+    console.log("Vendor IDs actualizados en referencia:", validIds);
+    // NO actualizar el estado de evaluation aquí para evitar re-renders y peticiones
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    // Log inicial para depurar error extraño
-    console.log("[handleSubmit] Se inició el submit. Evento:", e);
-    
     e.preventDefault();
-    if (!evaluation) return;
-    
-    if (!validateDates(evaluation.start_date, evaluation.end_date)) {
-      toast({
-        title: "Error",
-        description: "La fecha de fin debe ser posterior a la fecha de inicio.",
-        variant: "destructive",
-      });
-      return;
-    }
-    
     setLoading(true);
 
     try {
+      // Preparar preguntas para enviar
       const questionsPayload = evaluation.questions
         .filter(q => !(q.isNew && q.isDeleted))
         .map(q => {
-          const needsOptions = ['multiple_choice', 'single_choice', 'checkbox'].includes(q.type);
-          
-          // Prepare options specifically for the payload
-          const payloadOptions: any = {
-            type: q.type // Siempre incluir el tipo en las opciones
-          };
-          
-          // Incluir choices solo si el tipo lo necesita y hay opciones definidas
-          if (needsOptions && q.answerOptions && q.answerOptions.length > 0) {
-            payloadOptions.choices = q.answerOptions.map(opt => ({ 
-              id: opt.id, 
-              text: opt.text 
-            }));
-          }
+          const { isNew, isDeleted, ...rest } = q;
+          return rest;
+        });
 
-          return {
-            // Aligning keys with the expected type from the linter error
-            id: q.id,
-            text: q.text,                 // Renamed from question_text
-            type: q.type,                 // Moved type to top level
-            required: q.required,         // Renamed from is_required
-            weight: q.weight,
-            order: q.order,               // Renamed from order_index
-            category: q.category,
-            options: payloadOptions,      // Incluir opciones con la estructura correcta
-            isNew: q.isNew && !q.isDeleted ? true : undefined,
-            isDeleted: q.isDeleted ? true : undefined,
-          };
-      });
+      // Usar los vendor_ids de la referencia o mantener los existentes si no hay seleccionados
+      const vendorIds = selectedVendorIdsRef.current.length > 0
+        ? selectedVendorIdsRef.current
+        : evaluation.vendor_ids || [];
 
       // Construir el payload para la API
       const payload = {
-        id: evaluation.id,
-        title: evaluation.title,
-        description: evaluation.description,
-        start_date: evaluation.start_date,
-        end_date: evaluation.end_date,
-        vendor_ids: evaluation.vendor_ids,
-        metadata: {
-          type: evaluation.type,
-          is_anonymous: evaluation.is_anonymous,
-          settings: evaluation.settings
-        },
+        ...evaluation,
+        vendor_ids: vendorIds,
         questions: questionsPayload
       };
 
@@ -587,8 +557,8 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
               </div>
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="vendors">Proveedores</Label>
-                <VendorSelector
-                  selectedVendorIds={evaluation.vendor_ids || []}
+                <VendorSelectorContainer
+                  selectedVendorIds={selectedVendorIdsRef.current || []}
                   onSelect={handleVendorSelect}
                   disabled={loading}
                 />

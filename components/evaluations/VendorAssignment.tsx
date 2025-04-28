@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { VendorSelector } from "./VendorSelector";
+import { VendorSelectorContainer } from "./VendorSelectorContainer";
 import { useToast } from "@/components/ui/use-toast";
 import { Building2, CheckCircle2, XCircle, Users } from "lucide-react";
 import { Skeleton } from "../ui/skeleton";
@@ -29,7 +29,11 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selectedVendorIds, setSelectedVendorIds] = useState<string[]>([]);
+
+  // Referencia mutable para los IDs de vendors seleccionados
+  // en lugar de un estado que puede provocar re-renderizados
+  const selectedVendorIdsRef = useRef<string[]>([]);
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -45,7 +49,7 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
         if (response.status === 404) {
           // No vendors found, not an error
           setVendors([]);
-          setSelectedVendorIds([]);
+          selectedVendorIdsRef.current = [];
           return;
         }
         throw new Error(`Error ${response.status}: ${response.statusText}`);
@@ -62,12 +66,13 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
         .map((v: Vendor) => v.vendor_id)
         .filter(Boolean);
 
-      setSelectedVendorIds(vendorIds);
+      // Actualizar la referencia, no un estado
+      selectedVendorIdsRef.current = vendorIds;
     } catch (error) {
       console.error("Error fetching vendors:", error);
       // En caso de error, establecer arrays vacíos para evitar undefined
       setVendors([]);
-      setSelectedVendorIds([]);
+      selectedVendorIdsRef.current = [];
 
       toast({
         variant: "destructive",
@@ -82,7 +87,8 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
   const handleVendorSelect = (vendorIds: string[]) => {
     // Garantizar que vendorIds es un array
     const validIds = Array.isArray(vendorIds) ? vendorIds.filter(Boolean) : [];
-    setSelectedVendorIds(validIds);
+    // Actualizar la referencia, no un estado
+    selectedVendorIdsRef.current = validIds;
   };
 
   const startEditing = () => {
@@ -92,7 +98,8 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
       .map(v => v.vendor_id)
       .filter(Boolean);
 
-    setSelectedVendorIds(validVendorIds);
+    // Actualizar la referencia, no un estado
+    selectedVendorIdsRef.current = validVendorIds;
   };
 
   const cancelEditing = () => {
@@ -102,16 +109,17 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
       .map(v => v.vendor_id)
       .filter(Boolean);
 
-    setSelectedVendorIds(validVendorIds);
+    // Actualizar la referencia, no un estado
+    selectedVendorIdsRef.current = validVendorIds;
   };
 
   const saveVendors = async () => {
     try {
       setSaving(true);
 
-      // Validar los IDs antes de enviar
-      const validVendorIds = Array.isArray(selectedVendorIds)
-        ? selectedVendorIds.filter(Boolean)
+      // Validar los IDs antes de enviar - desde la referencia
+      const validVendorIds = Array.isArray(selectedVendorIdsRef.current)
+        ? selectedVendorIdsRef.current.filter(Boolean)
         : [];
 
       const response = await fetch(`/api/evaluations/${evaluationId}/vendors`, {
@@ -236,8 +244,8 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
             <Skeleton className="h-12 w-full" />
           </div>
         ) : editing ? (
-          <VendorSelector
-            selectedVendorIds={selectedVendorIds}
+            <VendorSelectorContainer
+              selectedVendorIds={selectedVendorIdsRef.current}
             onSelect={handleVendorSelect}
             disabled={saving}
           />

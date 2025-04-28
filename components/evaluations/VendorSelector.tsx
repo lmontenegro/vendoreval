@@ -1,19 +1,7 @@
 import { useEffect, useState, useRef, ReactNode } from "react";
-import { Check, ChevronsUpDown, X, AlertCircle, PlusCircle } from "lucide-react";
+import { Check, ChevronsUpDown, X, AlertCircle, PlusCircle, Search, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-} from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 
@@ -29,116 +17,115 @@ interface VendorSelectorProps {
   adminMode?: boolean;
 }
 
-// Componente para manejar errores en el renderizado
-function ErrorBoundary({ children, fallback }: { children: ReactNode, fallback: ReactNode }) {
-  const [hasError, setHasError] = useState(false);
-
-  // Usamos useEffect para simular el comportamiento de un error boundary
-  useEffect(() => {
-    const errorHandler = (event: ErrorEvent) => {
-      event.preventDefault();
-      setHasError(true);
-      console.error("Error capturado en ErrorBoundary:", event.error);
-    };
-
-    window.addEventListener('error', errorHandler);
-
-    return () => {
-      window.removeEventListener('error', errorHandler);
-    };
-  }, []);
-
-  if (hasError) {
-    return <>{fallback}</>;
-  }
-
-  return <>{children}</>;
-}
-
-// Componente de fallback simple para el selector
-function SimpleFallbackSelector({
-  buttonText,
+// Componente selector personalizado para reemplazar Command
+function CustomSelector({
   vendors,
   selectedVendors,
-  onSelect,
-  disabled
+  onSelectVendor,
+  isOpen,
+  setIsOpen,
+  onApplyChanges
 }: {
-  buttonText: string,
-  vendors: Vendor[],
-  selectedVendors: Vendor[],
-  onSelect: (vendorIds: string[]) => void,
-  disabled: boolean
+    vendors: Vendor[];
+    selectedVendors: Vendor[];
+    onSelectVendor: (vendor: Vendor) => void;
+    isOpen: boolean;
+    setIsOpen: (open: boolean) => void;
+    onApplyChanges: () => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const toggleOpen = () => {
-    if (!disabled) {
-      setIsOpen(!isOpen);
-    }
-  };
-
-  const selectVendor = (vendor: Vendor) => {
-    const isSelected = selectedVendors.some(v => v.id === vendor.id);
-    let updatedVendors: Vendor[];
-
-    if (isSelected) {
-      updatedVendors = selectedVendors.filter(v => v.id !== vendor.id);
-    } else {
-      updatedVendors = [...selectedVendors, vendor];
+  // Enfocar input cuando se abre
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      inputRef.current.focus();
     }
 
-    onSelect(updatedVendors.map(v => v.id));
-    setIsOpen(false);
+    // Cerrar al hacer clic fuera
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen, setIsOpen]);
+
+  // Filtrar vendors basado en búsqueda
+  const filteredVendors = vendors.filter(vendor =>
+    vendor.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Verificar si un vendor está seleccionado
+  const isSelected = (vendorId: string) => {
+    return selectedVendors.some(v => v.id === vendorId);
   };
+
+  if (!isOpen) return null;
 
   return (
-    <div className="w-full relative">
-      <Button
-        variant="outline"
-        className="w-full justify-between"
-        onClick={toggleOpen}
-        disabled={disabled}
-      >
-        {buttonText}
-        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-      </Button>
+    <div
+      ref={containerRef}
+      className="absolute z-50 w-full top-full left-0 mt-1 rounded-md border bg-white shadow-md"
+    >
+      <div className="flex items-center border-b p-2">
+        <Search className="h-4 w-4 mr-2 opacity-50 flex-shrink-0" />
+        <input
+          ref={inputRef}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Buscar proveedor..."
+          className="flex h-9 w-full rounded-md bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
+        />
+      </div>
 
-      {isOpen && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border rounded-md shadow-md">
-          <div className="p-2">
-            <input
-              className="w-full p-2 border rounded-md mb-2"
-              placeholder="Buscar proveedor..."
-            />
-
-            <div className="max-h-64 overflow-y-auto">
-              {vendors.length === 0 ? (
-                <div className="py-6 text-center text-sm">
-                  No hay proveedores disponibles
-                </div>
-              ) : (
-                vendors.map(vendor => (
-                  <div
-                    key={vendor.id}
-                    className="flex items-center p-2 hover:bg-gray-100 cursor-pointer rounded-md"
-                    onClick={() => selectVendor(vendor)}
-                  >
-                    <div className={cn(
-                      "mr-2 h-4 w-4",
-                      selectedVendors.some(v => v.id === vendor.id)
-                        ? "text-blue-500"
-                        : "opacity-0"
-                    )}>
-                      ✓
-                    </div>
-                    {vendor.name}
-                  </div>
-                ))
-              )}
-            </div>
+      <div className="max-h-64 overflow-y-auto p-1">
+        {filteredVendors.length === 0 && (
+          <div className="py-6 text-center text-sm text-muted-foreground">
+            {vendors.length === 0
+              ? "No hay proveedores disponibles"
+              : "No se encontraron proveedores"}
           </div>
-        </div>
-      )}
+        )}
+
+        {filteredVendors.map(vendor => (
+          <div
+            key={vendor.id}
+            onClick={() => onSelectVendor(vendor)}
+            className={cn(
+              "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none",
+              "hover:bg-accent hover:text-accent-foreground",
+              "data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+            )}
+            data-selected={isSelected(vendor.id)}
+            role="option"
+          >
+            <Check
+              className={cn(
+                "mr-2 h-4 w-4",
+                isSelected(vendor.id) ? "opacity-100" : "opacity-0"
+              )}
+            />
+            {vendor.name}
+          </div>
+        ))}
+      </div>
+
+      <div className="p-2 border-t flex justify-end">
+        <Button
+          size="sm"
+          onClick={() => {
+            onApplyChanges();
+            setIsOpen(false);
+          }}
+          className="gap-1"
+        >
+          <Save className="h-3 w-3" /> Aplicar
+        </Button>
+      </div>
     </div>
   );
 }
@@ -149,33 +136,24 @@ export function VendorSelector({
   disabled = false,
   adminMode = false
 }: VendorSelectorProps) {
-  // Usar useRef para prevenir el bucle infinito
-  const prevSelectedIdsRef = useRef<string[]>([]);
+  // Prevenir actualizaciones reactivas usando refs
+  const initialPropsProcessedRef = useRef<boolean>(false);
+  const proccessingSelectRef = useRef<boolean>(false);
+  const lastNotifiedIdsRef = useRef<string[]>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialFetchDoneRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const [open, setOpen] = useState(false);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedVendors, setSelectedVendors] = useState<Vendor[]>([]);
+  const [localSelectedVendors, setLocalSelectedVendors] = useState<Vendor[]>([]);
+  const [pendingSelectedVendors, setPendingSelectedVendors] = useState<Vendor[]>([]);
   const [loadingTimeout, setLoadingTimeout] = useState<boolean>(false);
   const [maxTimeReached, setMaxTimeReached] = useState<boolean>(false);
   const [noProvidersAssigned, setNoProvidersAssigned] = useState<boolean>(false);
-  const [commandRenderError, setCommandRenderError] = useState<boolean>(false);
-
-  // Función para comprobar si los arrays de IDs han cambiado realmente
-  const haveIdsChanged = (prevIds: string[], currentIds: string[] | undefined) => {
-    if (!currentIds) return prevIds.length > 0;
-    if (prevIds.length !== currentIds.length) return true;
-
-    const validCurrentIds = currentIds.filter(id =>
-      id !== undefined && id !== null && typeof id === 'string' && id.trim() !== ''
-    );
-
-    return validCurrentIds.some(id => !prevIds.includes(id)) ||
-      prevIds.some(id => !validCurrentIds.includes(id));
-  };
+  const [changesPending, setChangesPending] = useState<boolean>(false);
 
   // Función separada para listar todos los vendors disponibles
   const fetchAvailableVendors = async () => {
@@ -264,6 +242,7 @@ export function VendorSelector({
       }
     };
 
+    // Solo cargar al inicio, y solo una vez
     loadVendors();
 
     return () => {
@@ -273,8 +252,20 @@ export function VendorSelector({
     };
   }, [adminMode]);
 
-  // Effect para manejar los vendors seleccionados
+  // Effect para procesar los vendors seleccionados SOLO UNA VEZ al inicio
+  // Usamos useLayoutEffect para que se ejecute antes del renderizado
   useEffect(() => {
+    if (proccessingSelectRef.current) {
+      // No hacer nada si estamos en medio de una actualización generada por nosotros
+      proccessingSelectRef.current = false;
+      return;
+    }
+
+    // Si ya procesamos la selección inicial, no hacer nada
+    if (initialPropsProcessedRef.current) {
+      return;
+    }
+
     // Validar que selectedVendorIds sea un array
     if (!Array.isArray(selectedVendorIds)) {
       console.warn("[VendorSelector] selectedVendorIds no es un array:", selectedVendorIds);
@@ -294,24 +285,14 @@ export function VendorSelector({
     }, 15000); // 15 segundos máximo
 
     // Garantizar que selectedVendorIds siempre sea un array de strings válidos
-    const validSelectedIds = selectedVendorIds.filter(id =>
+    const validSelectedIds = selectedVendorIds.filter(id => 
       id !== undefined && id !== null && typeof id === 'string' && id.trim() !== ''
     );
 
-    // Solo ejecutar si los IDs realmente han cambiado
-    if (!haveIdsChanged(prevSelectedIdsRef.current, validSelectedIds)) {
-      clearTimeout(loadingTimeoutId);
-      clearTimeout(maxTimeTimeout);
-      return () => {
-        clearTimeout(loadingTimeoutId);
-        clearTimeout(maxTimeTimeout);
-      };
-    }
+    // Guardar los IDs que recibimos en props para comparar después
+    lastNotifiedIdsRef.current = [...validSelectedIds];
 
-    // Actualizar la referencia con los nuevos IDs válidos
-    prevSelectedIdsRef.current = [...validSelectedIds];
-
-    const updateSelectedVendors = async () => {
+    const processSelectedVendors = async () => {
       try {
         setError(null);
 
@@ -339,41 +320,33 @@ export function VendorSelector({
             const safeVendorsList = Array.isArray(vendorsList) ? vendorsList : [];
             setVendors(safeVendorsList);
 
-            // Ahora procesamos la selección con la lista de vendors disponibles
-            processSelectedVendors(safeVendorsList, validSelectedIds);
+            // Mapear IDs a objetos vendor
+            mapSelectedVendorsFromIds(safeVendorsList, validSelectedIds);
           }
         } else {
-          // Ya tenemos la lista de vendors, solo procesamos la selección
-          processSelectedVendors(vendors, validSelectedIds);
+          // Ya tenemos la lista de vendors, mapeamos IDs a objetos
+          mapSelectedVendorsFromIds(vendors, validSelectedIds);
         }
       } catch (error: any) {
-        console.error("[VendorSelector] Error actualizando vendors seleccionados:", error);
-        // No modificamos el estado de vendors ni selectedVendors en caso de error
+        console.error("[VendorSelector] Error procesando vendors seleccionados:", error);
       } finally {
         setLoading(false);
         clearTimeout(loadingTimeoutId);
         clearTimeout(maxTimeTimeout);
+        initialPropsProcessedRef.current = true;
       }
     };
 
-    // Función para procesar los vendors seleccionados
-    const processSelectedVendors = (vendorsList: Vendor[], validIds: string[]) => {
-      if (!Array.isArray(vendorsList)) {
-        console.warn("[VendorSelector] vendorsList no es un array:", vendorsList);
+    // Mapear IDs a objetos vendor
+    const mapSelectedVendorsFromIds = (vendorsList: Vendor[], validIds: string[]) => {
+      if (!Array.isArray(vendorsList) || !Array.isArray(validIds)) {
         return;
       }
 
-      if (!Array.isArray(validIds)) {
-        console.warn("[VendorSelector] validIds no es un array:", validIds);
-        return;
-      }
-
-      // Si hay IDs seleccionados, mapearlos a objetos vendor
       const selectedVendorsData: Vendor[] = [];
 
       if (validIds.length > 0) {
         for (const id of validIds) {
-          // Usar un bucle for normal para evitar problemas con find
           let foundVendor: Vendor | undefined = undefined;
           for (let i = 0; i < vendorsList.length; i++) {
             if (vendorsList[i] && vendorsList[i].id === id) {
@@ -388,12 +361,13 @@ export function VendorSelector({
         }
       }
 
-      // Actualizar estado
-      setSelectedVendors(selectedVendorsData);
+      // Actualizar estado local
+      setLocalSelectedVendors(selectedVendorsData);
+      setPendingSelectedVendors(selectedVendorsData);
       setNoProvidersAssigned(selectedVendorsData.length === 0);
     };
 
-    updateSelectedVendors();
+    processSelectedVendors();
 
     return () => {
       clearTimeout(loadingTimeoutId);
@@ -401,48 +375,115 @@ export function VendorSelector({
     };
   }, [selectedVendorIds, vendors, adminMode]);
 
-  const handleSelect = (vendor: Vendor) => {
-    if (!vendor || typeof vendor.id !== 'string' || vendor.id.trim() === '') return;
+  // Cuando cambie vendors, actualizar los vendors seleccionados localmente sin notificar
+  useEffect(() => {
+    if (!initialPropsProcessedRef.current || !Array.isArray(vendors) || vendors.length === 0) {
+      return;
+    }
 
-    let updatedSelection: Vendor[] = [];
+    // Extraer los IDs actuales
+    const currentSelectedIds = localSelectedVendors.map(v => v.id);
+
+    // Mapear IDs a los nuevos objetos vendor
+    const selectedVendorsData: Vendor[] = [];
+
+    for (const id of currentSelectedIds) {
+      let foundVendor: Vendor | undefined = undefined;
+      for (let i = 0; i < vendors.length; i++) {
+        if (vendors[i] && vendors[i].id === id) {
+          foundVendor = vendors[i];
+          break;
+        }
+      }
+
+      if (foundVendor) {
+        selectedVendorsData.push(foundVendor);
+      }
+    }
+
+    // Actualizar estado local sin triggear onSelect
+    setLocalSelectedVendors(selectedVendorsData);
+    setPendingSelectedVendors(selectedVendorsData);
+    setNoProvidersAssigned(selectedVendorsData.length === 0);
+  }, [vendors]);
+
+  // Función que se llama cuando cambiamos la selección en el dropdown
+  const handlePendingSelect = (vendor: Vendor) => {
+    if (!vendor || typeof vendor.id !== 'string' || vendor.id.trim() === '') return;
 
     // No usar some para evitar problemas
     let isSelected = false;
-    if (Array.isArray(selectedVendors)) {
-      for (let i = 0; i < selectedVendors.length; i++) {
-        if (selectedVendors[i] && selectedVendors[i].id === vendor.id) {
+    if (Array.isArray(pendingSelectedVendors)) {
+      for (let i = 0; i < pendingSelectedVendors.length; i++) {
+        if (pendingSelectedVendors[i] && pendingSelectedVendors[i].id === vendor.id) {
           isSelected = true;
           break;
         }
       }
     }
 
+    let updatedSelection: Vendor[] = [];
     if (isSelected) {
-      // No usar filter para evitar problemas
-      if (Array.isArray(selectedVendors)) {
-        updatedSelection = selectedVendors.filter(v => v && v.id !== vendor.id);
-      }
+      // Filtrar el vendor seleccionado
+      updatedSelection = Array.isArray(pendingSelectedVendors)
+        ? pendingSelectedVendors.filter(v => v && v.id !== vendor.id)
+        : [];
     } else {
-      updatedSelection = Array.isArray(selectedVendors) ?
-        [...selectedVendors, vendor] :
-        [vendor];
+      // Añadir el vendor seleccionado
+      updatedSelection = Array.isArray(pendingSelectedVendors)
+        ? [...pendingSelectedVendors, vendor]
+        : [vendor];
     }
 
-    setSelectedVendors(updatedSelection);
-    setNoProvidersAssigned(updatedSelection.length === 0);
+    // Solo actualizar el estado pendiente
+    setPendingSelectedVendors(updatedSelection);
+    setChangesPending(true);
+  };
 
-    // Garantizar que solo se devuelven ids válidos y no vacíos
-    const validIds: string[] = [];
-    if (Array.isArray(updatedSelection)) {
-      for (let i = 0; i < updatedSelection.length; i++) {
-        const v = updatedSelection[i];
-        if (v && typeof v.id === 'string' && v.id.trim() !== '') {
-          validIds.push(v.id);
-        }
+  // Función para aplicar los cambios pendientes
+  const applyPendingChanges = () => {
+    // Solo notificar si realmente hay cambios
+    const pendingIds = pendingSelectedVendors
+      .filter(v => v && typeof v.id === 'string' && v.id.trim() !== '')
+      .map(v => v.id);
+
+    // Verificar si los IDs son diferentes de lo que ya notificamos
+    const haveIdsChanged = () => {
+      if (lastNotifiedIdsRef.current.length !== pendingIds.length) return true;
+
+      // Verificar elemento por elemento
+      for (const id of pendingIds) {
+        if (!lastNotifiedIdsRef.current.includes(id)) return true;
       }
+
+      // También verificar al revés
+      for (const id of lastNotifiedIdsRef.current) {
+        if (!pendingIds.includes(id)) return true;
+      }
+
+      return false;
+    };
+
+    // Solo notificar si realmente hay cambios
+    if (haveIdsChanged()) {
+      console.log('[VendorSelector] Notificando cambios en la selección:', pendingIds);
+
+      // Actualizar la referencia
+      lastNotifiedIdsRef.current = [...pendingIds];
+
+      // Marcar que estamos procesando para ignorar el siguiente cambio en props
+      proccessingSelectRef.current = true;
+
+      // Notificar al componente padre
+      onSelect(pendingIds);
+    } else {
+      console.log('[VendorSelector] No hay cambios que notificar');
     }
 
-    onSelect(validIds);
+    // Actualizar el estado local con los cambios pendientes
+    setLocalSelectedVendors(pendingSelectedVendors);
+    setNoProvidersAssigned(pendingSelectedVendors.length === 0);
+    setChangesPending(false);
   };
 
   const removeVendor = (vendorId: string) => {
@@ -450,28 +491,31 @@ export function VendorSelector({
 
     // No usar filter para evitar problemas
     const updatedSelection: Vendor[] = [];
-    if (Array.isArray(selectedVendors)) {
-      for (let i = 0; i < selectedVendors.length; i++) {
-        if (selectedVendors[i] && selectedVendors[i].id !== vendorId) {
-          updatedSelection.push(selectedVendors[i]);
+    if (Array.isArray(localSelectedVendors)) {
+      for (let i = 0; i < localSelectedVendors.length; i++) {
+        if (localSelectedVendors[i] && localSelectedVendors[i].id !== vendorId) {
+          updatedSelection.push(localSelectedVendors[i]);
         }
       }
     }
 
-    setSelectedVendors(updatedSelection);
+    // Actualizar estado local y pendiente
+    setLocalSelectedVendors(updatedSelection);
+    setPendingSelectedVendors(updatedSelection);
     setNoProvidersAssigned(updatedSelection.length === 0);
 
-    // Garantizar que solo se devuelven ids válidos y no vacíos
-    const validIds: string[] = [];
-    if (Array.isArray(updatedSelection)) {
-      for (let i = 0; i < updatedSelection.length; i++) {
-        const v = updatedSelection[i];
-        if (v && typeof v.id === 'string' && v.id.trim() !== '') {
-          validIds.push(v.id);
-        }
-      }
-    }
+    // Extraer IDs válidos
+    const validIds = updatedSelection
+      .filter(v => v && typeof v.id === 'string' && v.id.trim() !== '')
+      .map(v => v.id);
 
+    // Actualizar la referencia
+    lastNotifiedIdsRef.current = [...validIds];
+
+    // Marcar que estamos procesando para ignorar el siguiente cambio en props
+    proccessingSelectRef.current = true;
+
+    // Notificar cambio explícitamente
     onSelect(validIds);
   };
 
@@ -482,9 +526,8 @@ export function VendorSelector({
       setError(null);
       setLoadingTimeout(false);
       setMaxTimeReached(false);
-      setCommandRenderError(false);
       initialFetchDoneRef.current = false;
-      prevSelectedIdsRef.current = []; // Forzar recarga
+      initialPropsProcessedRef.current = false;
 
       const allVendors = await fetchAvailableVendors();
 
@@ -528,8 +571,14 @@ export function VendorSelector({
           }
         }
 
-        setSelectedVendors(selectedVendorsData);
+        // Actualizar estados
+        setLocalSelectedVendors(selectedVendorsData);
+        setPendingSelectedVendors(selectedVendorsData);
         setNoProvidersAssigned(selectedVendorsData.length === 0);
+
+        // Actualizar referencias para prevenir actualizaciones innecesarias
+        lastNotifiedIdsRef.current = [...validSelectedIds];
+        initialPropsProcessedRef.current = true;
       }
     } catch (error: any) {
       console.error("[VendorSelector] Error en reloadVendors:", error);
@@ -546,8 +595,13 @@ export function VendorSelector({
     : [];
 
   // Garantizar que selectedVendors siempre sea un array válido para el renderizado
-  const safeSelectedVendors = Array.isArray(selectedVendors)
-    ? selectedVendors.filter(v => v && typeof v.id === 'string' && v.id.trim() !== '')
+  const safeSelectedVendors = Array.isArray(localSelectedVendors)
+    ? localSelectedVendors.filter(v => v && typeof v.id === 'string' && v.id.trim() !== '')
+    : [];
+
+  // Estado pendiente para la interfaz del dropdown
+  const safePendingSelectedVendors = Array.isArray(pendingSelectedVendors)
+    ? pendingSelectedVendors.filter(v => v && typeof v.id === 'string' && v.id.trim() !== '')
     : [];
 
   // Determinar el texto del botón según el estado
@@ -561,118 +615,22 @@ export function VendorSelector({
         ? "Asignar proveedores"
         : safeVendors.length === 0
           ? "No hay proveedores disponibles"
-          : "Seleccionar proveedores";
+          : changesPending
+            ? "Aplicar cambios a selección"
+            : "Seleccionar proveedores";
 
-  // Para evitar problemas con cmdk, siempre creamos un array vacío para que nunca sea undefined
-  const renderableVendors = safeVendors || [];
-  const renderableSelectedVendors = safeSelectedVendors || [];
+  // Función para alternar la apertura del dropdown sin enviar actualizaciones
+  const toggleDropdown = () => {
+    if (disabled) return;
 
-  // Renderizar los elementos del CommandItem de forma segura
-  const renderCommandItems = () => {
-    if (renderableVendors.length === 0) {
-      return null;
+    // Simplemente alternar el estado de apertura sin hacer peticiones
+    if (changesPending && open) {
+      // Revertir a la selección confirmada si hay cambios pendientes y estamos cerrando
+      setPendingSelectedVendors(localSelectedVendors);
+      setChangesPending(false);
     }
-
-    return renderableVendors.map((vendor, index) => {
-      if (!vendor || !vendor.id) return null;
-
-      // Verificación segura para la propiedad "some" 
-      let isSelected = false;
-      for (let i = 0; i < renderableSelectedVendors.length; i++) {
-        if (renderableSelectedVendors[i] && renderableSelectedVendors[i].id === vendor.id) {
-          isSelected = true;
-          break;
-        }
-      }
-
-      return (
-        <CommandItem
-          key={vendor.id || index}
-          value={vendor.id}
-          onSelect={() => handleSelect(vendor)}
-        >
-          <Check
-            className={cn(
-              "mr-2 h-4 w-4",
-              isSelected
-                ? "opacity-100"
-                : "opacity-0"
-            )}
-          />
-          {vendor.name}
-        </CommandItem>
-      );
-    });
+    setOpen(!open);
   };
-
-  // Componente alternativo para cuando no hay proveedores
-  const EmptyVendorsState = () => (
-    <div className="py-6 text-center text-sm">
-      No hay proveedores disponibles
-    </div>
-  );
-
-  const renderCommandComponent = () => {
-    // Inicializamos con un item "vacío" para casos en que no hay proveedores,
-    // esto asegura que cmdk siempre tenga la misma estructura
-    const itemsToRender = renderableVendors.length === 0 ? (
-      <CommandItem value="empty" disabled className="opacity-50 text-muted-foreground">
-        No hay proveedores disponibles
-      </CommandItem>
-    ) : renderableVendors.map((vendor, index) => {
-      if (!vendor || !vendor.id) return null;
-
-      // Verificación para la selección sin usar .some()
-      let isSelected = false;
-      for (let i = 0; i < renderableSelectedVendors.length; i++) {
-        if (renderableSelectedVendors[i] && renderableSelectedVendors[i].id === vendor.id) {
-          isSelected = true;
-          break;
-        }
-      }
-
-      return (
-        <CommandItem
-          key={vendor.id || index}
-          value={vendor.id}
-          onSelect={() => handleSelect(vendor)}
-        >
-          <Check
-            className={cn(
-              "mr-2 h-4 w-4",
-              isSelected
-                ? "opacity-100"
-                : "opacity-0"
-            )}
-          />
-          {vendor.name}
-        </CommandItem>
-      );
-    });
-
-    // Siempre retornamos la misma estructura de componente
-    return (
-      <Command>
-        <CommandInput placeholder="Buscar proveedor..." />
-        <CommandGroup className="max-h-64 overflow-y-auto">
-          {itemsToRender}
-        </CommandGroup>
-      </Command>
-    );
-  };
-
-  // Si hay un error en el renderizado, mostrar un fallback
-  if (commandRenderError) {
-    return (
-      <SimpleFallbackSelector
-        buttonText={buttonText}
-        vendors={renderableVendors}
-        selectedVendors={renderableSelectedVendors}
-        onSelect={onSelect}
-        disabled={disabled}
-      />
-    );
-  }
 
   return (
     <div className="space-y-2">
@@ -715,81 +673,70 @@ export function VendorSelector({
         <Alert variant="default" className="mb-4 border-blue-200 bg-blue-50">
           <PlusCircle className="h-4 w-4 text-blue-500" />
           <div className="ml-2 text-sm">
-            No hay proveedores asignados a esta evaluación.
+            No hay proveedores asignados a esta evaluación. 
             Utilice el selector para asignar uno o más proveedores.
           </div>
         </Alert>
       )}
 
-      <Popover
-        open={open && !disabled}
-        onOpenChange={(isOpen) => {
-          // Prevenir actualización de estado si está deshabilitado
-          if (!disabled) {
-            setOpen(isOpen);
-          }
-        }}
-      >
-        <PopoverTrigger asChild>
+      {changesPending && (
+        <Alert variant="default" className="mb-4 border-amber-200 bg-amber-50">
+          <AlertCircle className="h-4 w-4 text-amber-500" />
+          <div className="ml-2 text-sm">
+            Hay cambios pendientes en la selección de proveedores.
+          </div>
           <Button
-            variant={noProvidersAssigned ? "default" : "outline"}
-            role="combobox"
-            aria-expanded={open}
-            className="w-full justify-between"
-            disabled={disabled || (loading && !loadingTimeout)}
-            onClick={() => {
-              try {
-                if (error || (renderableVendors.length === 0 && !loading)) {
-                  // Si hay error o no hay proveedores, intentar cargar de nuevo
-                  reloadVendors();
-                }
-              } catch (err) {
-                console.error("[VendorSelector] Error en onClick:", err);
-                setCommandRenderError(true);
-              }
-            }}
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={applyPendingChanges}
           >
-            {buttonText}
-            {noProvidersAssigned ? (
-              <PlusCircle className="ml-2 h-4 w-4 shrink-0 opacity-70" />
-            ) : (
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-            )}
+            Aplicar cambios
           </Button>
-        </PopoverTrigger>
+        </Alert>
+      )}
 
-        {/* La clave es mantener PopoverContent siempre igual independientemente 
-          * de si está abierto o no, evitando montajes/desmontajes que pueden 
-          * causar problemas con cmdk */}
-        <PopoverContent className="w-full p-0">
-          <ErrorBoundary
-            fallback={
-              <div className="p-4">
-                <div className="py-6 text-center text-sm">
-                  No hay proveedores disponibles
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-2 w-full"
-                  onClick={() => {
-                    setCommandRenderError(true);
-                    setOpen(false);
-                  }}
-                >
-                  Usar selector alternativo
-                </Button>
-              </div>
-            }
+      <div ref={containerRef} className="relative">
+        <Button
+          variant={noProvidersAssigned ? "default" : "outline"}
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between"
+          disabled={disabled || (loading && !loadingTimeout)}
+          onClick={toggleDropdown}
+        >
+          {buttonText}
+          {noProvidersAssigned ? (
+            <PlusCircle className="ml-2 h-4 w-4 shrink-0 opacity-70" />
+          ) : (
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          )}
+        </Button>
+
+        {(error || (safeVendors.length === 0 && !loading && !noProvidersAssigned)) && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2 w-full text-xs"
+            onClick={reloadVendors}
           >
-            {renderCommandComponent()}
-          </ErrorBoundary>
-        </PopoverContent>
-      </Popover>
+            Recargar lista de proveedores
+          </Button>
+        )}
 
-      {renderableSelectedVendors.length > 0 && (
+        <CustomSelector
+          vendors={safeVendors}
+          selectedVendors={safePendingSelectedVendors}
+          onSelectVendor={handlePendingSelect}
+          isOpen={open && !disabled}
+          setIsOpen={setOpen}
+          onApplyChanges={applyPendingChanges}
+        />
+      </div>
+
+      {safeSelectedVendors.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-2">
-          {renderableSelectedVendors.map((vendor, index) => {
+          {safeSelectedVendors.map((vendor, index) => {
             if (!vendor || !vendor.id) return null;
             return (
               <Badge key={vendor.id || index} variant="secondary" className="flex items-center gap-1 py-1 px-3">
