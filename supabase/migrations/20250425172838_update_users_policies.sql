@@ -56,6 +56,19 @@ CREATE POLICY "Todos los usuarios autenticados pueden ver proveedores activos" O
     (is_active IS NULL OR is_active = true)
 );
 
+-- Asegurarse de que la política se creó, si ya existe no hará nada
+DO $$
+BEGIN
+    -- Verificar si la política ya existe
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'vendors' AND policyname = 'Todos los usuarios autenticados pueden ver proveedores activos'
+    ) THEN
+        -- Si no existe, crearla
+        EXECUTE 'CREATE POLICY "Todos los usuarios autenticados pueden ver proveedores activos" ON vendors FOR SELECT USING (auth.role() = ''authenticated'' AND (is_active IS NULL OR is_active = true))';
+    END IF;
+END
+$$;
+
 -- Política para permitir que los administradores gestionen cualquier proveedor
 CREATE POLICY "Los administradores pueden gestionar proveedores" ON vendors
   FOR ALL USING (
