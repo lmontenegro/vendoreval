@@ -146,7 +146,7 @@ export default function Login() {
       <div className="w-full max-w-md p-8 space-y-8 bg-white rounded-lg shadow-md">
         <div className="text-center">
           <div className="flex justify-center">
-            <Image src="/logo.svg" alt="Logo" width={120} height={120} priority />
+            <Image src="/ccmin-logo.png" alt="Logo" width={120} height={120} priority />
           </div>
           <h2 className="mt-6 text-3xl font-bold text-gray-900">Inicia sesión</h2>
           <p className="mt-2 text-sm text-gray-600">
