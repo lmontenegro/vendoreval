@@ -13,7 +13,6 @@ Tu sistema actual está compuesto por las siguientes tablas:
 - `profile_permissions` - Permisos directos asignados a perfiles
 - `roles` - Roles disponibles en el sistema
 - `role_permissions` - Permisos asignados a roles
-- `vendors` - Información de los proveedores/empresas
 
 ## Principios de Diseño
 
@@ -23,7 +22,7 @@ Tu sistema actual está compuesto por las siguientes tablas:
 - Esto permite:
   - Mantener sincronización con el sistema de autenticación
   - Añadir campos personalizados sin modificar la tabla de autenticación
-  - Optimizar consultas al tener referencias directas a perfiles, roles y proveedores
+  - Optimizar consultas al tener referencias directas a perfiles y roles
 
 ### 2. Sistema de Permisos Híbrido
 Tu estructura permite un sistema híbrido que combina:
@@ -226,7 +225,7 @@ Tu estructura permite un sistema híbrido que combina:
    };
    ```
 
-3. **Actualización de Rol en Todos los Usuarios de un Proveedor**
+3. **Actualización de Rol en Todos los Usuarios de un Vendor**
    ```typescript
    const updateRoleForVendorUsers = async (vendorId: string, roleId: string) => {
      const { data, error } = await supabase
@@ -344,18 +343,6 @@ USING (
   )
 );
 
--- Política para que los gerentes de vendedor puedan ver usuarios de su vendedor
-CREATE POLICY "Los gerentes pueden ver usuarios de su vendedor"
-ON public.users FOR SELECT
-USING (
-  EXISTS (
-    SELECT 1 FROM public.users u
-    WHERE u.id = auth.uid() 
-    AND u.role_id IN (SELECT id FROM roles WHERE name = 'vendor_manager')
-    AND u.vendor_id = public.users.vendor_id
-  )
-);
-
 -- Roles (solo administradores)
 CREATE POLICY "Solo administradores pueden gestionar roles"
 ON roles FOR ALL
@@ -402,19 +389,17 @@ auth.users           public.users            profiles
 +-----------+        | vendor_id    |        +--------------+
                      | ...          |
                      +--------------+
-                          |    |
-                          |    |
-                          |    +----------------+
-                          |                     |
-                          v                     v
-                     roles                    vendors
-                     +--------------+        +--------------+
-                     | id           |        | id           |
-                     | name         |        | name         |
-                     | description  |        | ...          |
-                     | ...          |        |              |
-                     +--------------+        +--------------+
-                          |
+                          |            |
+                          | role_id    | vendor_id
+                          v            v
+                     roles          vendor           profile_permissions
+                     +--------------+        +--------------+        +--------------+
+                     | id           |        | id           |        | id           |
+                     | name         |        | ...          |        | profile_id   |
+                     | description  |        | ...          |        | resource     |
+                     | ...          |        +--------------+        | action       |
+                     +--------------+                                | ...          |
+                          |                                          +--------------+
                           |
                           |
             role_permissions       permissions
@@ -475,42 +460,6 @@ const useUserWithRoleAndPermissions = (userId: string) => {
   }, [userId]);
   
   return { userData, permissions, loading, error };
-};
-
-// Hook para filtrar usuarios por vendedor
-const useVendorUsers = (vendorId: string) => {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  
-  useEffect(() => {
-    const fetchVendorUsers = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('users')
-          .select(`
-            *,
-            profile:profile_id(*),
-            role:role_id(*)
-          `)
-          .eq('vendor_id', vendorId);
-          
-        if (error) throw error;
-        
-        setUsers(data);
-      } catch (err) {
-        setError(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    if (vendorId) {
-      fetchVendorUsers();
-    }
-  }, [vendorId]);
-  
-  return { users, loading, error };
 };
 
 // Componente de protección por permisos
@@ -575,7 +524,7 @@ const RequirePermission = ({
      email VARCHAR(255) NOT NULL,
      profile_id UUID REFERENCES profiles(id),
      role_id UUID REFERENCES roles(id),
-     vendor_id UUID REFERENCES vendors(id),
+     vendor_id UUID REFERENCES vendor(id),
      created_at TIMESTAMPTZ DEFAULT NOW(),
      updated_at TIMESTAMPTZ DEFAULT NOW()
    );
@@ -603,7 +552,7 @@ const RequirePermission = ({
 
 1. **Utiliza transacciones para operaciones críticas**
    ```typescript
-   const createUserWithRole = async (userData, roleId, vendorId) => {
+   const createUserWithRole = async (userData, roleId) => {
      // Iniciar una transacción en el cliente
      const { error } = await supabase.rpc('begin_transaction');
      if (error) throw error;
@@ -611,15 +560,7 @@ const RequirePermission = ({
      try {
        // Ejecutar operaciones dentro de la transacción
        const { data: user } = await createUser(userData);
-       
-       // Actualizar user con rol y vendedor
-       await supabase
-         .from('users')
-         .update({ 
-           role_id: roleId,
-           vendor_id: vendorId 
-         })
-         .eq('id', user.id);
+       await assignRoleToUser(user.id, roleId);
        
        // Confirmar transacción
        await supabase.rpc('commit_transaction');
@@ -673,55 +614,35 @@ const RequirePermission = ({
    FOR EACH ROW EXECUTE PROCEDURE audit_role_changes();
    ```
 
-3. **Implementa filtrado por vendedor**
+3. **Implementa caché distribuida para entornos de producción**
    ```typescript
-   // Función para filtrar registros por vendedor del usuario actual
-   const applyVendorFilter = (query, includeAdmin = true) => {
-     return async (req, res, next) => {
-       const userId = req.user?.id;
-       if (!userId) {
-         return res.status(401).json({ error: 'No autenticado' });
-       }
-       
-       try {
-         // Obtener información del usuario
-         const { data: userData, error } = await supabase
-           .from('users')
-           .select('role_id, vendor_id')
-           .eq('id', userId)
-           .single();
-           
-         if (error) throw error;
-         
-         // Verificar si es admin (opcional)
-         if (includeAdmin) {
-           const { data: isAdmin } = await supabase
-             .from('roles')
-             .select('name')
-             .eq('id', userData.role_id)
-             .single();
-             
-           if (isAdmin && isAdmin.name === 'admin') {
-             // Los admins ven todo
-             req.query = query;
-             return next();
-           }
-         }
-         
-         // Aplicar filtro por vendor_id
-         if (userData.vendor_id) {
-           req.query = {
-             ...query,
-             vendor_id: userData.vendor_id
-           };
-         }
-         
-         next();
-       } catch (error) {
-         console.error('Error aplicando filtro por vendedor:', error);
-         return res.status(500).json({ error: 'Error interno' });
-       }
-     };
+   // Ejemplo con Redis (para entornos de producción)
+   import { createClient } from 'redis';
+   
+   const redisClient = createClient({ url: process.env.REDIS_URL });
+   
+   // Conectar Redis
+   await redisClient.connect();
+   
+   const cachePermission = async (userId, resource, action, hasPermission) => {
+     const key = `perm:${userId}:${resource}:${action}`;
+     await redisClient.set(key, JSON.stringify(hasPermission), {
+       EX: 300 // Expirar en 5 minutos
+     });
+   };
+   
+   const getCachedPermission = async (userId, resource, action) => {
+     const key = `perm:${userId}:${resource}:${action}`;
+     const result = await redisClient.get(key);
+     return result ? JSON.parse(result) : null;
+   };
+   
+   // Invalidar permisos de un usuario
+   const invalidateUserPermissions = async (userId) => {
+     const keys = await redisClient.keys(`perm:${userId}:*`);
+     if (keys.length > 0) {
+       await redisClient.del(keys);
+     }
    };
    ```
 
@@ -729,16 +650,9 @@ const RequirePermission = ({
    ```typescript
    // Ejemplo de test para verificación de permisos
    describe('Sistema de permisos', () => {
-     let userId, roleId, vendorId;
+     let userId, roleId;
      
      beforeAll(async () => {
-       // Crear vendedor de prueba
-       const { data: vendor } = await supabase
-         .from('vendors')
-         .insert([{ name: 'Vendor Test' }])
-         .select();
-       vendorId = vendor[0].id;
-       
        // Crear usuario de prueba
        const { user } = await supabase.auth.signUp({
          email: 'test@example.com',
@@ -753,14 +667,8 @@ const RequirePermission = ({
        // Asignar permiso al rol
        await assignPermissionToRole(roleId, 'test_resource', 'read');
        
-       // Actualizar usuario con rol y vendedor
-       await supabase
-         .from('users')
-         .update({ 
-           role_id: roleId,
-           vendor_id: vendorId 
-         })
-         .eq('id', userId);
+       // Asignar rol al usuario
+       await assignRoleToUser(userId, roleId);
      });
      
      test('El usuario debe tener permiso para leer test_resource', async () => {
@@ -768,42 +676,9 @@ const RequirePermission = ({
        expect(hasPermission).toBe(true);
      });
      
-     test('El usuario debe estar asociado al vendedor correcto', async () => {
-       const { data } = await supabase
-         .from('users')
-         .select('vendor_id')
-         .eq('id', userId)
-         .single();
-         
-       expect(data.vendor_id).toBe(vendorId);
+     test('El usuario NO debe tener permiso para escribir test_resource', async () => {
+       const hasPermission = await checkPermission(userId, 'test_resource', 'write');
+       expect(hasPermission).toBe(false);
      });
    });
-   ```
-
-5. **Segmentación por vendedor**
-   ```typescript
-   // Función para obtener datos segmentados por vendedor
-   const getVendorSegmentedData = async (tableName, userId) => {
-     // Primero obtenemos el vendor del usuario
-     const { data: userData, error: userError } = await supabase
-       .from('users')
-       .select('vendor_id, role:role_id(name)')
-       .eq('id', userId)
-       .single();
-       
-     if (userError) throw userError;
-     
-     // Consulta base
-     let query = supabase.from(tableName).select('*');
-     
-     // Si no es admin, filtramos por vendor_id
-     if (userData.role.name !== 'admin') {
-       query = query.eq('vendor_id', userData.vendor_id);
-     }
-     
-     const { data, error } = await query;
-     
-     if (error) throw error;
-     return data;
-   };
    ```

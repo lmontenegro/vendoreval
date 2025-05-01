@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/use-toast";
 import { useRouter } from "next/navigation";
+import { supabase } from '@/lib/supabase/client';
+import { getUserRole } from '@/lib/services/auth-service';
 import {
   BarChart3,
   ClipboardList,
@@ -58,6 +61,7 @@ function getStatusColor(status: string): string {
 
 export default function Dashboard() {
   const router = useRouter();
+  const { toast } = useToast();
   // State for Stats
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
@@ -67,6 +71,32 @@ export default function Dashboard() {
   const [recentEvaluations, setRecentEvaluations] = useState<RecentEvaluation[]>([]);
   const [loadingRecent, setLoadingRecent] = useState(true);
   const [errorRecent, setErrorRecent] = useState<string | null>(null);
+
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [roleLoading, setRoleLoading] = useState(true);
+
+
+  useEffect(() => {
+    const fetchUserRole = async () => {
+      try {
+        setRoleLoading(true);
+        const role = await getUserRole(supabase);
+        setUserRole(role);
+      } catch (error) {
+        console.error("Error fetching user role:", error);
+        toast({
+          title: "Error de Permisos",
+          description: "No se pudo verificar tu rol de usuario.",
+          variant: "destructive",
+        });
+      } finally {
+        setRoleLoading(false);
+      }
+    };
+
+    fetchUserRole();
+  }, [toast]);
+
 
   // Fetch Stats
   useEffect(() => {
@@ -126,12 +156,16 @@ export default function Dashboard() {
             Bienvenido al panel de control de evaluación de proveedores
           </p>
         </div>
-        <Button
-          className="gap-2"
-          onClick={() => router.push('/evaluations/new')}
-        >
-          <Plus className="w-4 h-4" /> Nueva Evaluación
-        </Button>
+        
+        {userRole === 'admin' && (
+          <Button
+            className="gap-2"
+            onClick={() => router.push('/evaluations/new')}
+          >
+            <Plus className="w-4 h-4" /> Nueva Evaluación
+          </Button>
+        )}
+
       </div>
 
       {/* Stats Grid */}

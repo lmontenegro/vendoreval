@@ -158,18 +158,43 @@ export async function getEvaluations(
 
     let filteredQuery = query;
     if (roleData.name.toLowerCase() !== 'admin') {
-      console.log("[DEBUG getEvaluations] Usuario no es admin, filtrando por vendor_id:", userData.vendor_id);
+      console.log("[DEBUG getEvaluations] Usuario no es admin, obteniendo evaluaciones asignadas para vendor_id:", userData.vendor_id);
 
       if (!userData.vendor_id) {
-        console.log("[DEBUG getEvaluations] Usuario no tiene vendor_id asignado");
+        console.log("[DEBUG getEvaluations] Usuario no admin sin vendor_id asignado. Retornando vacío.");
         return { data: [], error: null };
       }
 
-      filteredQuery = query.eq('vendor_id', userData.vendor_id);
+      // 1. Obtener los IDs de las evaluaciones asignadas a este vendor
+      const { data: assignedEvals, error: assignedEvalsError } = await client
+        .from('evaluation_vendors')
+        .select('evaluation_id')
+        .eq('vendor_id', userData.vendor_id);
+
+      if (assignedEvalsError) {
+        console.error("[DEBUG getEvaluations] Error obteniendo IDs de evaluaciones asignadas:", assignedEvalsError);
+        throw assignedEvalsError;
+      }
+
+      const evaluationIds = assignedEvals.map(ev => ev.evaluation_id);
+
+      if (!evaluationIds || evaluationIds.length === 0) {
+        console.log("[DEBUG getEvaluations] Vendor ID", userData.vendor_id, "no tiene evaluaciones asignadas. Retornando vacío.");
+        return { data: [], error: null };
+      }
+
+      console.log("[DEBUG getEvaluations] IDs de evaluaciones encontradas para el vendor:", evaluationIds);
+
+      // 2. Filtrar la consulta principal por esos IDs
+      filteredQuery = query.in('id', evaluationIds);
+
     } else {
       console.log("[DEBUG getEvaluations] Usuario es admin, mostrando todas las evaluaciones");
+      // Para admin, no se aplica filtro adicional aquí, la query base ya está seleccionada
+      // filteredQuery = query; // Esta línea es redundante ya que filteredQuery se inicializa con query
     }
 
+    // Ejecutar la consulta (filtrada o no)
     const { data, error } = await filteredQuery;
 
     if (error) {
