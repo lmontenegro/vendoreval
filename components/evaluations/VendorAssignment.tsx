@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { VendorSelectorContainer } from "./VendorSelectorContainer";
 import { useToast } from "@/components/ui/use-toast";
-import { Building2, CheckCircle2, XCircle, Users } from "lucide-react";
+import { Building2, CheckCircle2, Users } from "lucide-react";
 import { Skeleton } from "../ui/skeleton";
 import Link from "next/link";
 
@@ -29,27 +29,32 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const initialLoadComplete = useRef(false);
 
-  // Referencia mutable para los IDs de vendors seleccionados
-  // en lugar de un estado que puede provocar re-renderizados
-  const selectedVendorIdsRef = useRef<string[]>([]);
+  // Estados para manejar los IDs de los proveedores seleccionados
+  const [selectedVendorIds, setSelectedVendorIds] = useState<string[]>([]);
 
   const { toast } = useToast();
 
+  // Cargar los proveedores asignados cuando se monta el componente
   useEffect(() => {
-    fetchVendors();
+    if (!initialLoadComplete.current) {
+      fetchVendors();
+    }
   }, [evaluationId]);
 
   const fetchVendors = async () => {
     try {
       setLoading(true);
+      console.log(`🔄 Obteniendo proveedores para evaluación: ${evaluationId}`);
+
       const response = await fetch(`/api/evaluations/${evaluationId}/vendors`);
 
       if (!response.ok) {
         if (response.status === 404) {
           // No vendors found, not an error
           setVendors([]);
-          selectedVendorIdsRef.current = [];
+          setSelectedVendorIds([]);
           return;
         }
         throw new Error(`Error ${response.status}: ${response.statusText}`);
@@ -66,13 +71,16 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
         .map((v: Vendor) => v.vendor_id)
         .filter(Boolean);
 
-      // Actualizar la referencia, no un estado
-      selectedVendorIdsRef.current = vendorIds;
+      console.log(`✅ Proveedores cargados: ${vendorIds.length}`);
+
+      // Actualizar el estado
+      setSelectedVendorIds(vendorIds);
+      initialLoadComplete.current = true;
     } catch (error) {
       console.error("Error fetching vendors:", error);
       // En caso de error, establecer arrays vacíos para evitar undefined
       setVendors([]);
-      selectedVendorIdsRef.current = [];
+      setSelectedVendorIds([]);
 
       toast({
         variant: "destructive",
@@ -85,49 +93,40 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
   };
 
   const handleVendorSelect = (vendorIds: string[]) => {
-    // Garantizar que vendorIds es un array
-    const validIds = Array.isArray(vendorIds) ? vendorIds.filter(Boolean) : [];
-    // Actualizar la referencia, no un estado
-    selectedVendorIdsRef.current = validIds;
+    // Actualizamos el estado local sin hacer peticiones adicionales
+    setSelectedVendorIds(vendorIds);
   };
 
-  const startEditing = () => {
-    setEditing(true);
-    // Asegurar que vendors.map no devuelve undefined
-    const validVendorIds = vendors
-      .map(v => v.vendor_id)
-      .filter(Boolean);
+  const startEditing = (e: React.MouseEvent) => {
+    // Prevenir cualquier propagación del evento que pueda causar comportamientos inesperados
+    e.preventDefault();
+    e.stopPropagation();
 
-    // Actualizar la referencia, no un estado
-    selectedVendorIdsRef.current = validVendorIds;
+    console.log("Iniciando modo de edición");
+    setEditing(true);
   };
 
   const cancelEditing = () => {
     setEditing(false);
-    // Asegurar que vendors.map no devuelve undefined
-    const validVendorIds = vendors
+    // Recargar datos si el usuario cancela para volver al estado original
+    const vendorIds = vendors
       .map(v => v.vendor_id)
       .filter(Boolean);
 
-    // Actualizar la referencia, no un estado
-    selectedVendorIdsRef.current = validVendorIds;
+    setSelectedVendorIds(vendorIds);
   };
 
   const saveVendors = async () => {
     try {
       setSaving(true);
-
-      // Validar los IDs antes de enviar - desde la referencia
-      const validVendorIds = Array.isArray(selectedVendorIdsRef.current)
-        ? selectedVendorIdsRef.current.filter(Boolean)
-        : [];
+      console.log(`💾 Guardando ${selectedVendorIds.length} proveedores para evaluación ${evaluationId}`);
 
       const response = await fetch(`/api/evaluations/${evaluationId}/vendors`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ vendor_ids: validVendorIds })
+        body: JSON.stringify({ vendor_ids: selectedVendorIds })
       });
 
       if (!response.ok) {
@@ -135,6 +134,7 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
         throw new Error(errorData.error || `Error ${response.status}`);
       }
 
+      // Actualizar el listado de proveedores después de guardar
       await fetchVendors();
       setEditing(false);
 
@@ -205,6 +205,7 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
 
         {canManage && !editing && (
           <Button
+            type="button"
             variant="outline"
             size="sm"
             onClick={startEditing}
@@ -217,6 +218,7 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
         {editing && (
           <div className="flex items-center gap-2">
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={cancelEditing}
@@ -225,6 +227,7 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
               Cancelar
             </Button>
             <Button
+              type="button"
               variant="default"
               size="sm"
               onClick={saveVendors}
@@ -245,15 +248,16 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
           </div>
         ) : editing ? (
             <VendorSelectorContainer
-              selectedVendorIds={selectedVendorIdsRef.current}
-            onSelect={handleVendorSelect}
-            disabled={saving}
-          />
+              selectedVendorIds={selectedVendorIds}
+              onSelect={handleVendorSelect}
+              disabled={saving}
+            />
         ) : vendors.length === 0 ? (
           <div className="text-center py-6 text-muted-foreground">
             <p>No hay proveedores asignados a esta evaluación</p>
             {canManage && (
               <Button
+                    type="button"
                 variant="outline"
                 size="sm"
                 onClick={startEditing}
@@ -314,4 +318,4 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
       </CardContent>
     </Card>
   );
-} 
+}
