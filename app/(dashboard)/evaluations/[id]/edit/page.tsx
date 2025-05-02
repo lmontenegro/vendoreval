@@ -48,6 +48,12 @@ interface Question {
   isDeleted?: boolean;
 }
 
+interface Vendor {
+  id: string;
+  name: string;
+  status?: string;
+}
+
 interface Evaluation {
   id: string;
   title: string;
@@ -58,6 +64,7 @@ interface Evaluation {
   status: string;
   is_anonymous: boolean;
   vendor_ids?: string[];
+  vendors?: Vendor[];
   settings: {
     allow_partial_save: boolean;
     require_comments: boolean;
@@ -86,6 +93,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
     status: "draft",
     is_anonymous: false,
     vendor_ids: [],
+    vendors: [],
     settings: {
       allow_partial_save: true,
       require_comments: false,
@@ -131,25 +139,9 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
         // Extraer metadatos
         const metadata = data.metadata || {};
         
-        // Get assigned vendors
-        let vendorIds: string[] = [];
-        try {
-          const { data: assignedVendors, error: vendorsError } = await supabase
-            .from('evaluation_vendors')
-            .select('vendor_id')
-            .eq('evaluation_id', params.id);
-
-          if (vendorsError) {
-            console.error("Error fetching assigned vendors:", vendorsError);
-            // Si hay un error, mantenemos el array vacío para vendorIds
-          } else {
-            // Solo mapear si no hay error y assignedVendors existe
-            vendorIds = assignedVendors?.map((v: { vendor_id: string }) => v.vendor_id) || [];
-          }
-        } catch (error) {
-          console.error("Exception fetching assigned vendors:", error);
-          // Mantener el array vacío en caso de excepción
-        }
+        // Obtener los IDs de los vendors asignados (podría venir directamente del response)
+        const vendors = data.vendors || [];
+        const vendorIds = vendors.map((v: Vendor) => v.id);
 
         // Inicializar la referencia con los vendor IDs iniciales
         selectedVendorIdsRef.current = [...vendorIds];
@@ -162,7 +154,8 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
           status: data.status,
           start_date: data.start_date,
           end_date: data.end_date,
-          vendor_ids: vendorIds, // Usar el array definido arriba, que estará vacío si hubo error
+          vendor_ids: vendorIds,
+          vendors: vendors, // Incluir los vendors completos con su status
           // Extraer los datos del metadata
           type: metadata.type || 'performance',
           is_anonymous: metadata.is_anonymous || false,
@@ -558,7 +551,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="vendors">Proveedores</Label>
                 <VendorSelectorContainer
-                  selectedVendorIds={selectedVendorIdsRef.current || []}
+                  selectedVendorIds={evaluation.vendors?.map(v => v.id) || []}
                   onSelect={handleVendorSelect}
                   disabled={loading}
                 />
