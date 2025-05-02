@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { X, ChevronsUpDown, PlusCircle, Loader2 } from "lucide-react";
@@ -27,50 +27,17 @@ export function VendorSelectorContainer({
   const [selectedVendors, setSelectedVendors] = useState<Vendor[]>([]);
   const [availableVendors, setAvailableVendors] = useState<Vendor[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const initialFetchDoneRef = useRef<boolean>(false);
 
   // Efecto para cargar los vendors al montar el componente
   useEffect(() => {
     const fetchVendors = async () => {
+      // Si ya hemos hecho la carga inicial, no hacerla nuevamente
+      if (initialFetchDoneRef.current) return;
+
       setLoading(true);
       try {
-        // Obtenemos el ID de la evaluación de la URL
-        const evaluationId = window.location.pathname.split('/').filter(Boolean).pop();
-        
-        // Si estamos editando una evaluación, primero verificamos si tiene vendors asociados
-        if (evaluationId) {
-          try {
-            const evalResponse = await fetch(`/api/evaluations/${evaluationId}`);
-            if (evalResponse.ok) {
-              const evalData = await evalResponse.json();
-              // Si la evaluación tiene vendors, los utilizamos directamente
-              if (evalData.data && evalData.data.vendors && Array.isArray(evalData.data.vendors)) {
-                // Cargar todos los vendors disponibles
-                const vendorsResponse = await fetch('/api/evaluations/vendors');
-                if (!vendorsResponse.ok) {
-                  throw new Error(`Error ${vendorsResponse.status}: ${vendorsResponse.statusText}`);
-                }
-
-                const vendorsData = await vendorsResponse.json();
-                const allVendorsList = vendorsData.data || [];
-                setAllVendors(allVendorsList);
-
-                // Usar los vendors de la evaluación como seleccionados
-                setSelectedVendors(evalData.data.vendors);
-
-                // Calcular vendors disponibles (los que no están asignados a la evaluación)
-                const selectedIds = evalData.data.vendors.map((v: Vendor) => v.id);
-                setAvailableVendors(allVendorsList.filter((v: Vendor) => !selectedIds.includes(v.id)));
-                setLoading(false);
-                return;
-              }
-            }
-          } catch (error) {
-            console.error("Error al obtener detalles de la evaluación:", error);
-          }
-        }
-
-        // Si no hay datos de evaluación o falla, cargamos todos los vendors y filtramos
-        console.log("Cargando todos los vendors disponibles");
+        console.log("Cargando inicialmente todos los vendors disponibles");
         const response = await fetch('/api/evaluations/vendors');
         if (!response.ok) {
           throw new Error(`Error ${response.status}: ${response.statusText}`);
@@ -79,20 +46,28 @@ export function VendorSelectorContainer({
         const data = await response.json();
         const vendorsList = data.data || [];
         
+        // Guardar todos los vendors disponibles
         setAllVendors(vendorsList);
+        initialFetchDoneRef.current = true;
+
+        // Procesar los vendors seleccionados inicialmente
+        const validSelectedIds = Array.isArray(selectedVendorIds)
+          ? selectedVendorIds.filter(id => typeof id === 'string' && id.trim() !== '')
+          : [];
         
-        // Obtener los vendors seleccionados
-        if (selectedVendorIds.length > 0) {
-          const selected = vendorsList.filter((v: Vendor) =>
-            selectedVendorIds.includes(v.id)
+        if (validSelectedIds.length > 0) {
+          // Filtrar vendors seleccionados usando los IDs proporcionados
+          const selected = vendorsList.filter((v: Vendor) => 
+            validSelectedIds.includes(v.id)
           ).map((v: Vendor) => ({
             ...v,
             status: v.status || 'pending' // Asegurar que tengan status por defecto
           }));
           
           setSelectedVendors(selected);
-          setAvailableVendors(vendorsList.filter((v: Vendor) => !selectedVendorIds.includes(v.id)));
+          setAvailableVendors(vendorsList.filter((v: Vendor) => !validSelectedIds.includes(v.id)));
         } else {
+          // Si no hay seleccionados, todos están disponibles
           setSelectedVendors([]);
           setAvailableVendors(vendorsList);
         }
@@ -106,7 +81,40 @@ export function VendorSelectorContainer({
     };
 
     fetchVendors();
-  }, [selectedVendorIds]);
+  }, []);
+
+  // Efecto para actualizar la selección basada en props sin hacer peticiones API
+  useEffect(() => {
+    // Si todavía no hemos cargado los vendors, no hacer nada
+    if (allVendors.length === 0) return;
+
+    console.log("Actualizando selección local de vendors sin peticiones API");
+
+    // Garantizar que selectedVendorIds sea un array válido
+    const validSelectedIds = Array.isArray(selectedVendorIds)
+      ? selectedVendorIds.filter(id => typeof id === 'string' && id.trim() !== '')
+      : [];
+
+    if (validSelectedIds.length > 0) {
+      // Filtrar vendors seleccionados del listado completo
+      const selected = allVendors.filter((v: Vendor) =>
+        validSelectedIds.includes(v.id)
+      ).map((v: Vendor) => ({
+        ...v,
+        status: v.status || 'pending' // Asegurar que tengan status por defecto
+      }));
+
+      // Actualizar estado local
+      setSelectedVendors(selected);
+
+      // Actualizar vendors disponibles (los que no están seleccionados)
+      setAvailableVendors(allVendors.filter((v: Vendor) => !validSelectedIds.includes(v.id)));
+    } else {
+      // Si no hay seleccionados, todos están disponibles
+      setSelectedVendors([]);
+      setAvailableVendors([...allVendors]);
+    }
+  }, [selectedVendorIds, allVendors]);
 
   const handleVendorSelection = (vendor: Vendor) => {
     // Verificar si el vendor ya está seleccionado

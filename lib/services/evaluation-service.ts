@@ -465,7 +465,8 @@ export async function createEvaluation(
         is_required: question.required,
         order_index: question.order,
         validation_rules: null,
-        metadata: { evaluation_id: evaluationId }
+        metadata: { evaluation_id: evaluationId },
+        type: question.type
       }));
 
       const { error: questionsError } = await client

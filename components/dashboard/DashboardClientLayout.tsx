@@ -21,7 +21,7 @@ export default function DashboardClientLayout({ children, userRole, userPermissi
   }, [userRole, userPermissions]);
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
+    <div id="dashboard-client-layout" data-user-role={userRole} className="min-h-screen bg-gray-100 dark:bg-gray-950">
       {/* Navigation es position: fixed por lo que necesitamos un div que ocupe el mismo espacio */}
       <div className="w-64 flex-shrink-0" /> {/* Placeholder para el sidebar */}
       <div className="flex">

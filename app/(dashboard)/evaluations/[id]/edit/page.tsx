@@ -79,9 +79,12 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Referencia para almacenar temporalmente los IDs de proveedores seleccionados
   const selectedVendorIdsRef = useRef<string[]>([]);
+  // Referencia para evitar múltiples peticiones en cortos intervalos
+  const isSubmittingRef = useRef<boolean>(false);
 
   const [evaluation, setEvaluation] = useState<Evaluation>({
     id: params.id,
@@ -212,6 +215,8 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
   const handleChange = (field: string, value: any) => {
     if (!evaluation) return;
 
+    setHasUnsavedChanges(true);
+
     if (field.includes('.')) {
       const [parent, child] = field.split('.');
       setEvaluation(prev => {
@@ -262,6 +267,8 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
       }
     }
 
+    setHasUnsavedChanges(true);
+
     setEvaluation(prev => {
       if (!prev) return prev;
       return {
@@ -273,7 +280,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
 
   const addQuestion = () => {
     if (!evaluation) return;
-    const defaultType = 'rating_5'; // Or perhaps 'multiple_choice' if that's more common?
+    const defaultType = 'rating_5'; // O usar 'escala 1-5' o 'si/no/no aplica' según corresponda
     const needsOptions = ['multiple_choice', 'single_choice', 'checkbox'].includes(defaultType);
 
     const newQuestion: Question = {
@@ -282,16 +289,17 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
       text: '',
       required: true,
       weight: 1.0,
-      order: evaluation.questions.filter(q => !q.isDeleted).length + 1, // Correct order based on visible questions
+      order: evaluation.questions.filter(q => !q.isDeleted).length + 1, // Calcular orden según preguntas visibles
       category: 'general',
-      options: {}, // Keep this structure for now?
-      answerOptions: needsOptions ? [{ id: uuidv4(), text: '' }] : [], // Initialize if needed
+      options: {},
+      answerOptions: needsOptions ? [{ id: uuidv4(), text: '' }] : [], // Inicializar si se necesita
       isNew: true
     };
 
+    setHasUnsavedChanges(true);
+
     setEvaluation(prev => {
       if (!prev) return prev;
-      // Append to the end, reordering happens on delete/submit if necessary
       return {
         ...prev,
         questions: [...prev.questions, newQuestion] 
@@ -304,8 +312,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
 
     const allQuestions = [...evaluation.questions];
     const questionToRemove = allQuestions.find((q, idx) => {
-        // Find the actual question in the full list corresponding 
-        // to the visible index `index`
+      // Encontrar la pregunta que corresponde al índice visible
         let visibleCount = 0;
         for(let i=0; i < allQuestions.length; i++) {
             if (!allQuestions[i].isDeleted) {
@@ -316,22 +323,22 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
         return false;
     });
 
-    if (!questionToRemove) return; // Should not happen
+    if (!questionToRemove) return; 
 
-    // Find the real index in the full array
+    // Encontrar el índice real en el array completo
     const realIndex = allQuestions.findIndex(q => q.id === questionToRemove.id);
     
-    if (realIndex === -1) return; // Should not happen
+    if (realIndex === -1) return;
 
-    // If it's a new question not saved yet, remove it completely
+    // Si es una pregunta nueva no guardada, eliminarla completamente
     if (allQuestions[realIndex].isNew) {
         allQuestions.splice(realIndex, 1);
     } else {
-        // Otherwise, mark it as deleted
+      // Sino, marcarla como eliminada
         allQuestions[realIndex].isDeleted = true;
     }
 
-    // Re-calculate order for visible questions
+    // Recalcular orden para preguntas visibles
     let currentOrder = 1;
     const updatedQuestions = allQuestions.map(q => {
         if (!q.isDeleted) {
@@ -339,6 +346,8 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
         }
         return q;
     });
+
+    setHasUnsavedChanges(true);
 
     setEvaluation(prev => {
       if (!prev) return prev;
@@ -355,21 +364,37 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
   };
 
   const handleVendorSelect = (vendorIds: string[]) => {
-    // Solo almacenar los IDs en la referencia sin efectos secundarios
     // Garantizar que vendorIds es un array válido
     const validIds = Array.isArray(vendorIds)
       ? vendorIds.filter(id => typeof id === 'string' && id.trim() !== '')
       : [];
 
-    // Actualizar la referencia silenciosamente sin modificar el estado
+    // Actualizar la referencia y marcar que hay cambios sin guardar
     selectedVendorIdsRef.current = validIds;
+    setHasUnsavedChanges(true);
     console.log("Vendor IDs actualizados en referencia:", validIds);
-    // NO actualizar el estado de evaluation aquí para evitar re-renders y peticiones
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Evitar envíos duplicados mientras se procesa una solicitud
+    if (isSubmittingRef.current) {
+      console.log("Evitando envío duplicado mientras se procesa una solicitud anterior");
+      return;
+    }
+
+    // No hay cambios sin guardar, no enviar
+    if (!hasUnsavedChanges) {
+      toast({
+        title: "Sin cambios",
+        description: "No hay cambios para guardar",
+      });
+      return;
+    }
+
     setLoading(true);
+    isSubmittingRef.current = true;
 
     try {
       // Preparar preguntas para enviar
@@ -421,6 +446,9 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
         throw new Error(errorData.error || "Error al actualizar la evaluación");
       }
       
+      // Resetear el estado de cambios sin guardar
+      setHasUnsavedChanges(false);
+
       toast({
         title: "Evaluación actualizada",
         description: "Los cambios han sido guardados exitosamente.",
@@ -437,6 +465,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
       });
     } finally {
       setLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 
@@ -551,7 +580,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="vendors">Proveedores</Label>
                 <VendorSelectorContainer
-                  selectedVendorIds={evaluation.vendors?.map(v => v.id) || []}
+                  selectedVendorIds={evaluation.vendor_ids || evaluation.vendors?.map(v => v.id) || []}
                   onSelect={handleVendorSelect}
                   disabled={loading}
                 />
@@ -681,8 +710,8 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
                         <Input
                           id={`q-${question.id}-weight`}
                           type="number"
-                          min="0"
-                          max="1"
+                          min="1"
+                          max="7"
                           step="0.1"
                           value={question.weight}
                           onChange={(e) => handleQuestionChange(originalIndex, "weight", parseFloat(e.target.value) || 0)}
@@ -754,10 +783,28 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
               </div>
             )}
           </CardContent>
-          <CardFooter>
-            <Button type="submit" disabled={loading} className="ml-auto gap-2">
-              <Save className="w-4 h-4" />
-              {loading ? "Guardando..." : "Guardar Cambios"}
+          <CardFooter className="flex justify-between">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => router.push('/evaluations')}
+              disabled={loading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={loading}
+              className="gap-2"
+            >
+              {loading ? (
+                <>Guardando...</>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" />
+                  {hasUnsavedChanges ? "Guardar cambios" : "Guardar"}
+                </>
+              )}
             </Button>
           </CardFooter>
         </Card>

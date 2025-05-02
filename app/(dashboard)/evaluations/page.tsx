@@ -29,8 +29,6 @@ import { useToast } from "@/components/ui/use-toast";
 import { getEvaluations, type Evaluation } from "@/lib/services/evaluation-service";
 import { addDays, format, isWithinInterval } from "date-fns";
 import type { DateRange } from "react-day-picker";
-import { supabase } from '@/lib/supabase/client';
-import { getUserRole } from '@/lib/services/auth-service';
 
 export default function Evaluations() {
   const router = useRouter();
@@ -48,8 +46,18 @@ export default function Evaluations() {
     key: "created_at",
     direction: "desc",
   });
+
+  // Obtener el userRole del HTML (inyectado por el layout)
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [roleLoading, setRoleLoading] = useState(true);
+
+  useEffect(() => {
+    // Obtener el rol de usuario del dataset del elemento HTML
+    const dashboardElement = document.getElementById('dashboard-client-layout');
+    const role = dashboardElement?.dataset.userRole || null;
+    setUserRole(role);
+
+    console.log("Role obtenido del layout:", role);
+  }, []);
 
   useEffect(() => {
     setDateRange({
@@ -57,27 +65,6 @@ export default function Evaluations() {
       to: new Date(),
     });
   }, []);
-
-  useEffect(() => {
-    const fetchUserRole = async () => {
-      try {
-        setRoleLoading(true);
-        const role = await getUserRole(supabase);
-        setUserRole(role);
-      } catch (error) {
-        console.error("Error fetching user role:", error);
-        toast({
-          title: "Error de Permisos",
-          description: "No se pudo verificar tu rol de usuario.",
-          variant: "destructive",
-        });
-      } finally {
-        setRoleLoading(false);
-      }
-    };
-
-    fetchUserRole();
-  }, [toast]);
 
   useEffect(() => {
     const fetchEvaluations = async () => {
@@ -218,7 +205,7 @@ export default function Evaluations() {
       }
     });
 
-  if (loading || roleLoading) {
+  if (loading) {
     return <div className="flex items-center justify-center min-h-screen">
       <p className="text-muted-foreground">Cargando...</p>
     </div>;
@@ -233,7 +220,7 @@ export default function Evaluations() {
             Gestiona y monitorea las evaluaciones de proveedores
           </p>
         </div>
-        {userRole === 'admin' && (
+        {(userRole === 'admin' || userRole === 'evaluator') && (
           <Button
             className="gap-2"
             onClick={() => router.push('/evaluations/new')}

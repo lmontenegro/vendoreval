@@ -73,6 +73,7 @@ export default function NewEvaluation() {
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [evaluation, setEvaluation] = useState({
     title: "",
     description: "",
@@ -130,10 +131,10 @@ export default function NewEvaluation() {
   const addQuestion = () => {
     const newQuestion: Question = {
       id: uuidv4(),
-      type: 'rating_5',
+      type: 'si/no/no aplica',
       text: '',
       required: true,
-      weight: 1.0,
+      weight: 1,
       order: evaluation.questions.length + 1,
       category: 'general',
       options: {}
@@ -159,7 +160,6 @@ export default function NewEvaluation() {
   };
 
   const handleVendorSelect = (vendorIds: string[]) => {
-    // Garantizar que vendor_ids es siempre un array válido
     const validIds = Array.isArray(vendorIds) ? vendorIds : [];
 
     setEvaluation(prev => ({
@@ -189,10 +189,19 @@ export default function NewEvaluation() {
       return;
     }
 
+    if (evaluation.questions.filter(q => !q.isDeleted).length === 0) {
+      toast({
+        title: "Error de Validación",
+        description: "Debe agregar al menos una pregunta a la evaluación.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
     setLoading(true);
 
     try {
-      // Construir el payload a partir del estado 'evaluation'
       const payload = {
         title: evaluation.title,
         description: evaluation.description,
@@ -203,63 +212,39 @@ export default function NewEvaluation() {
         settings: evaluation.settings,
         vendor_ids: evaluation.vendor_ids,
         questions: evaluation.questions
-          .filter(q => !q.isDeleted) // No enviar preguntas marcadas para borrar si son nuevas
+          .filter(q => !q.isDeleted)
           .map(q => {
-            const needsOptions = ['multiple_choice', 'single_choice', 'checkbox'].includes(q.type);
-            // Preparar opciones para el payload, filtrando textos vacíos
-            const answerOptions = (q.answerOptions || [])
-              .filter((opt: AnswerOption) => opt.text && opt.text.trim() !== '')
-              .map((opt: AnswerOption) => ({ id: opt.id, text: opt.text.trim() }));
+            let options: any = { type: q.type };
+
+            if (q.type === 'escala 1-5') {
+              options = {
+                ...options,
+                min_label: "Muy malo",
+                max_label: "Excelente"
+              };
+            }
 
             return {
-              id: q.id, // El backend manejará si es nuevo o no si se lo indicamos (o genera uno nuevo)
+              id: q.id,
               type: q.type,
               text: q.text,
               required: q.required,
               weight: q.weight,
               order: q.order,
               category: q.category || 'general',
-              // Pasar las opciones limpias
-              options: { 
-                type: q.type, // Incluir tipo dentro de options
-                ...(needsOptions && answerOptions.length > 0 ? { choices: answerOptions } : {}) // Incluir choices solo si son necesarias y válidas
-              }
-              // No necesitamos isNew/isDeleted para la creación inicial
+              options: options
             };
           })
       };
-      
-      // --- Validaciones (Ej: Fechas, preguntas mínimas, etc.) ---
-      if (!validateDates(payload.start_date, payload.end_date)) {
-        toast({
-          title: "Error de Validación",
-          description: "La fecha de fin debe ser posterior a la fecha de inicio.",
-          variant: "destructive",
-        });
-        setLoading(false);
-        return;
-      }
-      if (payload.questions.length === 0) {
-        toast({
-          title: "Error de Validación",
-          description: "Debe agregar al menos una pregunta a la evaluación.",
-          variant: "destructive",
-        });
-        setLoading(false);
-        return;
-      }
-      // Añadir más validaciones si es necesario...
 
-      // Llamar a la API POST
       const response = await fetch('/api/evaluations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload), // Enviar el payload construido
+        body: JSON.stringify(payload),
       });
 
-      // Manejar la respuesta de la API
       if (!response.ok) {
         let errorData = { error: `Error ${response.status}` };
         try {
@@ -269,13 +254,11 @@ export default function NewEvaluation() {
         } catch (parseError) {
           console.error("Error parsing error response:", parseError);
         }
-        // Lanzar error con mensaje de la API
         throw new Error(errorData.error || `Error al crear la evaluación`); 
       }
-      
-      // Obtener ID de la respuesta (si la API lo devuelve en 'data.id')
+
       const { data: responseData } = await response.json();
-      const newEvaluationId = responseData?.id; // Asumiendo que la API devuelve { data: { id: ... } }
+      const newEvaluationId = responseData?.id;
 
       toast({
         title: "Evaluación creada",
@@ -295,51 +278,25 @@ export default function NewEvaluation() {
     }
   };
 
-  // Función para formatear las opciones de la pregunta según su tipo
   const getQuestionOptions = (question: Question) => {
-    const questionType = questionTypes.find(type => type.id === question.type);
-    
     switch (question.type) {
-      case 'rating_5':
+      case 'escala 1-5':
         return {
-          type: 'rating_5',
+          type: 'escala 1-5',
           min_label: "Muy malo",
           max_label: "Excelente"
         };
-      case 'rating_10':
+      case 'si/no/no aplica':
         return {
-          type: 'rating_10',
-          min_label: "Muy malo",
-          max_label: "Excelente"
-        };
-      case 'yes_no':
-        return {
-          type: 'yes_no'
-        };
-      case 'multiple_choice':
-        return {
-          type: 'multiple_choice',
-          choices: ["Opción 1", "Opción 2", "Opción 3"]
-        };
-      case 'multiple_answer':
-        return {
-          type: 'multiple_answer',
-          choices: ["Opción 1", "Opción 2", "Opción 3"]
-        };
-      case 'text_short':
-        return {
-          type: 'text_short'
-        };
-      case 'text_long':
-        return {
-          type: 'text_long'
+          type: 'si/no/no aplica'
         };
       default:
-        return question.options;
+        return {
+          type: question.type || 'si/no/no aplica'
+        };
     }
   };
 
-  // Agregar useEffect para debugging
   useEffect(() => {
     console.log('vendor_ids actualizado:', evaluation.vendor_ids);
   }, [evaluation.vendor_ids]);
@@ -424,12 +381,11 @@ export default function NewEvaluation() {
                 />
               </div>
               <div className="space-y-2 md:col-span-2">
-                <Label>Asignar Proveedores</Label>
-                <VendorSelector
-                  selectedVendorIds={evaluation.vendor_ids || []}
+                <Label>Proveedores</Label>
+                <VendorSelector 
+                  selectedVendorIds={evaluation.vendor_ids}
                   onSelect={handleVendorSelect}
-                  adminMode={false}
-                  disabled={loading}
+                  lazyLoad={true}
                 />
                 <p className="text-sm text-muted-foreground">
                   Selecciona los proveedores que participarán en esta evaluación
@@ -548,12 +504,13 @@ export default function NewEvaluation() {
                     <Label>Peso</Label>
                     <Input
                       type="number"
-                      min="0"
-                      max="1"
-                      step="0.1"
+                      min="1"
+                      max="7"
+                      step="1"
                       value={question.weight}
-                      onChange={(e) => handleQuestionChange(index, "weight", parseFloat(e.target.value))}
+                      onChange={(e) => handleQuestionChange(index, "weight", parseInt(e.target.value, 10) || 1)}
                     />
+                    <p className="text-xs text-muted-foreground">Valor entero entre 1 y 7</p>
                   </div>
                   <div className="flex items-center justify-between">
                     <Label>Obligatoria</Label>

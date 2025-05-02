@@ -850,12 +850,15 @@ export const evaluationTypes: { id: string; name: string }[] = [
 ];
 
 // Question types
-export const questionTypes: { id: string; name: string; scale?: number; allowsMultiple?: boolean }[] = [
-  { id: 'rating_5', name: 'Escala 1-5', scale: 5 },
-  { id: 'rating_10', name: 'Escala 1-10', scale: 10 },
-  { id: 'yes_no', name: 'Sí/No' },
-  { id: 'multiple_choice', name: 'Opción Múltiple', allowsMultiple: false },
-  { id: 'multiple_answer', name: 'Selección Múltiple', allowsMultiple: true },
-  { id: 'text_short', name: 'Texto Corto' },
-  { id: 'text_long', name: 'Texto Largo' }
+export const questionTypes = [
+  {
+    id: 'escala 1-5',
+    name: 'Escala 1-5',
+    description: 'Pregunta con respuesta en escala del 1 al 5'
+  },
+  {
+    id: 'si/no/no aplica',
+    name: 'Si/No/No Aplica',
+    description: 'Pregunta con respuesta de Si, No o No Aplica'
+  }
 ];

@@ -281,6 +281,7 @@ export type Database = {
           order_index: number | null
           question_text: string
           subcategory: string | null
+          type: Database["public"]["Enums"]["question_type"]
           updated_at: string | null
           validation_rules: Json | null
           weight: number | null
@@ -296,6 +297,7 @@ export type Database = {
           order_index?: number | null
           question_text: string
           subcategory?: string | null
+          type: Database["public"]["Enums"]["question_type"]
           updated_at?: string | null
           validation_rules?: Json | null
           weight?: number | null
@@ -311,6 +313,7 @@ export type Database = {
           order_index?: number | null
           question_text?: string
           subcategory?: string | null
+          type?: Database["public"]["Enums"]["question_type"]
           updated_at?: string | null
           validation_rules?: Json | null
           weight?: number | null
@@ -392,6 +395,7 @@ export type Database = {
       }
       responses: {
         Row: {
+          compliance_percentage: number | null
           created_at: string | null
           evaluation_id: string
           evidence_urls: string[] | null
@@ -402,10 +406,10 @@ export type Database = {
           response_value: string
           review_date: string | null
           reviewed_by: string | null
-          score: number | null
           updated_at: string | null
         }
         Insert: {
+          compliance_percentage?: number | null
           created_at?: string | null
           evaluation_id: string
           evidence_urls?: string[] | null
@@ -416,10 +420,10 @@ export type Database = {
           response_value: string
           review_date?: string | null
           reviewed_by?: string | null
-          score?: number | null
           updated_at?: string | null
         }
         Update: {
+          compliance_percentage?: number | null
           created_at?: string | null
           evaluation_id?: string
           evidence_urls?: string[] | null
@@ -430,7 +434,6 @@ export type Database = {
           response_value?: string
           review_date?: string | null
           reviewed_by?: string | null
-          score?: number | null
           updated_at?: string | null
         }
         Relationships: [
@@ -760,6 +763,7 @@ export type Database = {
         | "pending_review"
         | "completed"
         | "archived"
+      question_type: "escala 1-5" | "si/no/no aplica"
       recommendation_status:
         | "pending"
         | "in_progress"
@@ -888,6 +892,7 @@ export const Constants = {
         "completed",
         "archived",
       ],
+      question_type: ["escala 1-5", "si/no/no aplica"],
       recommendation_status: [
         "pending",
         "in_progress",

@@ -15,6 +15,7 @@ interface VendorSelectorProps {
   onSelect: (vendorIds: string[]) => void;
   disabled?: boolean;
   adminMode?: boolean;
+  lazyLoad?: boolean;
 }
 
 // Componente selector personalizado para reemplazar Command
@@ -116,6 +117,7 @@ function CustomSelector({
 
       <div className="p-2 border-t flex justify-end">
         <Button
+          type="button"
           size="sm"
           onClick={() => {
             onApplyChanges();
@@ -134,7 +136,8 @@ export function VendorSelector({
   selectedVendorIds = [], // Garantizar que nunca sea undefined
   onSelect,
   disabled = false,
-  adminMode = false
+  adminMode = false,
+  lazyLoad = false // Por defecto, cargar de forma normal (no lazy)
 }: VendorSelectorProps) {
   // Prevenir actualizaciones reactivas usando refs
   const initialPropsProcessedRef = useRef<boolean>(false);
@@ -204,7 +207,7 @@ export function VendorSelector({
 
   // Effect para cargar la lista de vendors disponibles al inicio
   useEffect(() => {
-    if (initialFetchDoneRef.current) return;
+    if (initialFetchDoneRef.current || (lazyLoad && !open)) return;
 
     const loadVendors = async () => {
       try {
@@ -242,7 +245,7 @@ export function VendorSelector({
       }
     };
 
-    // Solo cargar al inicio, y solo una vez
+    // Solo cargar al inicio, y solo una vez (o cuando se abra, si es lazy loading)
     loadVendors();
 
     return () => {
@@ -250,7 +253,7 @@ export function VendorSelector({
         abortControllerRef.current.abort();
       }
     };
-  }, [adminMode]);
+  }, [open, lazyLoad, adminMode]);
 
   // Effect para procesar los vendors seleccionados SOLO UNA VEZ al inicio
   // Usamos useLayoutEffect para que se ejecute antes del renderizado
@@ -639,6 +642,7 @@ export function VendorSelector({
           <AlertCircle className="h-4 w-4" />
           <div className="ml-2 text-sm">{error}</div>
           <Button
+            type="button"
             variant="outline"
             size="sm"
             className="ml-auto"
@@ -658,6 +662,7 @@ export function VendorSelector({
           </div>
           {!maxTimeReached && (
             <Button
+              type="button"
               variant="outline"
               size="sm"
               className="ml-auto"
@@ -686,6 +691,7 @@ export function VendorSelector({
             Hay cambios pendientes en la selección de proveedores.
           </div>
           <Button
+            type="button"
             variant="outline"
             size="sm"
             className="ml-auto"
@@ -698,6 +704,7 @@ export function VendorSelector({
 
       <div ref={containerRef} className="relative">
         <Button
+          type="button"
           variant={noProvidersAssigned ? "default" : "outline"}
           role="combobox"
           aria-expanded={open}
@@ -715,6 +722,7 @@ export function VendorSelector({
 
         {(error || (safeVendors.length === 0 && !loading && !noProvidersAssigned)) && (
           <Button
+            type="button"
             variant="outline"
             size="sm"
             className="mt-2 w-full text-xs"
