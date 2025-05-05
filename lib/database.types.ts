@@ -9,87 +9,102 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      evaluation_criteria: {
+      evaluation_questions: {
         Row: {
-          category: string
-          created_at: string
-          description: string | null
+          created_at: string | null
+          evaluation_id: string
           id: string
-          is_active: boolean | null
-          name: string
-          updated_at: string | null
-          weight: number
+          order_index: number | null
+          question_id: string
         }
         Insert: {
-          category: string
-          created_at?: string
-          description?: string | null
+          created_at?: string | null
+          evaluation_id: string
           id?: string
-          is_active?: boolean | null
-          name: string
-          updated_at?: string | null
-          weight: number
+          order_index?: number | null
+          question_id: string
         }
         Update: {
-          category?: string
-          created_at?: string
-          description?: string | null
+          created_at?: string | null
+          evaluation_id?: string
           id?: string
-          is_active?: boolean | null
-          name?: string
-          updated_at?: string | null
-          weight?: number
-        }
-        Relationships: []
-      }
-      evaluation_scores: {
-        Row: {
-          comments: string | null
-          created_at: string
-          criteria_id: string | null
-          evaluation_id: string | null
-          id: string
-          score: number
-          updated_at: string | null
-        }
-        Insert: {
-          comments?: string | null
-          created_at?: string
-          criteria_id?: string | null
-          evaluation_id?: string | null
-          id?: string
-          score: number
-          updated_at?: string | null
-        }
-        Update: {
-          comments?: string | null
-          created_at?: string
-          criteria_id?: string | null
-          evaluation_id?: string | null
-          id?: string
-          score?: number
-          updated_at?: string | null
+          order_index?: number | null
+          question_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "evaluation_scores_criteria_id_fkey"
-            columns: ["criteria_id"]
-            isOneToOne: false
-            referencedRelation: "evaluation_criteria"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "evaluation_scores_evaluation_id_fkey"
+            foreignKeyName: "evaluation_questions_evaluation_id_fkey"
             columns: ["evaluation_id"]
             isOneToOne: false
             referencedRelation: "evaluations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evaluation_questions_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      evaluation_vendors: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          completed_at: string | null
+          evaluation_id: string
+          id: string
+          metadata: Json | null
+          status: string | null
+          vendor_id: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          completed_at?: string | null
+          evaluation_id: string
+          id?: string
+          metadata?: Json | null
+          status?: string | null
+          vendor_id: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          completed_at?: string | null
+          evaluation_id?: string
+          id?: string
+          metadata?: Json | null
+          status?: string | null
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "evaluation_vendors_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evaluation_vendors_evaluation_id_fkey"
+            columns: ["evaluation_id"]
+            isOneToOne: false
+            referencedRelation: "evaluations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evaluation_vendors_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
       }
       evaluations: {
         Row: {
-          categories: Json | null
           created_at: string | null
           description: string | null
           end_date: string | null
@@ -97,7 +112,6 @@ export type Database = {
           id: string
           metadata: Json | null
           progress: number | null
-          questions: Json | null
           start_date: string | null
           status: Database["public"]["Enums"]["evaluation_status"] | null
           title: string
@@ -106,7 +120,6 @@ export type Database = {
           vendor_id: string | null
         }
         Insert: {
-          categories?: Json | null
           created_at?: string | null
           description?: string | null
           end_date?: string | null
@@ -114,7 +127,6 @@ export type Database = {
           id?: string
           metadata?: Json | null
           progress?: number | null
-          questions?: Json | null
           start_date?: string | null
           status?: Database["public"]["Enums"]["evaluation_status"] | null
           title: string
@@ -123,7 +135,6 @@ export type Database = {
           vendor_id?: string | null
         }
         Update: {
-          categories?: Json | null
           created_at?: string | null
           description?: string | null
           end_date?: string | null
@@ -131,7 +142,6 @@ export type Database = {
           id?: string
           metadata?: Json | null
           progress?: number | null
-          questions?: Json | null
           start_date?: string | null
           status?: Database["public"]["Enums"]["evaluation_status"] | null
           title?: string
@@ -284,7 +294,7 @@ export type Database = {
           type: Database["public"]["Enums"]["question_type"]
           updated_at: string | null
           validation_rules: Json | null
-          weight: number | null
+          weight: number
         }
         Insert: {
           category: string
@@ -300,7 +310,7 @@ export type Database = {
           type: Database["public"]["Enums"]["question_type"]
           updated_at?: string | null
           validation_rules?: Json | null
-          weight?: number | null
+          weight?: number
         }
         Update: {
           category?: string
@@ -316,7 +326,7 @@ export type Database = {
           type?: Database["public"]["Enums"]["question_type"]
           updated_at?: string | null
           validation_rules?: Json | null
-          weight?: number | null
+          weight?: number
         }
         Relationships: []
       }
@@ -395,7 +405,7 @@ export type Database = {
       }
       responses: {
         Row: {
-          compliance_percentage: number | null
+          answer: Database["public"]["Enums"]["answer_enum"] | null
           created_at: string | null
           evaluation_id: string
           evidence_urls: string[] | null
@@ -406,10 +416,12 @@ export type Database = {
           response_value: string
           review_date: string | null
           reviewed_by: string | null
+          score: number
           updated_at: string | null
+          vendor_id: string | null
         }
         Insert: {
-          compliance_percentage?: number | null
+          answer?: Database["public"]["Enums"]["answer_enum"] | null
           created_at?: string | null
           evaluation_id: string
           evidence_urls?: string[] | null
@@ -420,10 +432,12 @@ export type Database = {
           response_value: string
           review_date?: string | null
           reviewed_by?: string | null
+          score?: number
           updated_at?: string | null
+          vendor_id?: string | null
         }
         Update: {
-          compliance_percentage?: number | null
+          answer?: Database["public"]["Enums"]["answer_enum"] | null
           created_at?: string | null
           evaluation_id?: string
           evidence_urls?: string[] | null
@@ -434,7 +448,9 @@ export type Database = {
           response_value?: string
           review_date?: string | null
           reviewed_by?: string | null
+          score?: number
           updated_at?: string | null
+          vendor_id?: string | null
         }
         Relationships: [
           {
@@ -456,6 +472,13 @@ export type Database = {
             columns: ["reviewed_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "responses_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
@@ -629,61 +652,6 @@ export type Database = {
         }
         Relationships: []
       }
-      evaluation_vendors: {
-        Row: {
-          id: string
-          evaluation_id: string
-          vendor_id: string
-          assigned_at: string
-          assigned_by: string | null
-          status: string | null
-          completed_at: string | null
-          metadata: Json | null
-        }
-        Insert: {
-          id?: string
-          evaluation_id: string
-          vendor_id: string
-          assigned_at?: string
-          assigned_by?: string | null
-          status?: string | null
-          completed_at?: string | null
-          metadata?: Json | null
-        }
-        Update: {
-          id?: string
-          evaluation_id?: string
-          vendor_id?: string
-          assigned_at?: string
-          assigned_by?: string | null
-          status?: string | null
-          completed_at?: string | null
-          metadata?: Json | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "evaluation_vendors_evaluation_id_fkey"
-            columns: ["evaluation_id"]
-            isOneToOne: false
-            referencedRelation: "evaluations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "evaluation_vendors_vendor_id_fkey"
-            columns: ["vendor_id"]
-            isOneToOne: false
-            referencedRelation: "vendors"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "evaluation_vendors_assigned_by_fkey"
-            columns: ["assigned_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          }
-        ]
-      }
     }
     Views: {
       admin_users_cache: {
@@ -757,6 +725,7 @@ export type Database = {
       }
     }
     Enums: {
+      answer_enum: "Yes" | "No" | "N/A"
       evaluation_status:
         | "draft"
         | "in_progress"
@@ -885,6 +854,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      answer_enum: ["Yes", "No", "N/A"],
       evaluation_status: [
         "draft",
         "in_progress",

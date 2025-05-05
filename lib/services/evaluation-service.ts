@@ -1,20 +1,28 @@
 import { SupabaseClient, createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
-import { Database } from '../database.types';
+import { Database, Json } from '../database.types';
 
 type Tables = Database['public']['Tables'];
-type EvaluationStatus = Database['public']['Enums']['evaluation_status'];
+type Enums = Database['public']['Enums'];
+
+// Define interfaces for clearer type checking
+export interface QuestionOption {
+  id: string;
+  text: string;
+  // Add other option properties if needed
+}
 
 export interface Question {
   id: string;
-  category: string;
-  subcategory?: string | null;
-  question_text: string;
-  description?: string | null;
-  options: any;
+  category: string; // Assuming NOT NULL in DB based on previous errors
+  subcategory: string | null;
+  question_text: string; // Assuming NOT NULL in DB
+  description: string | null;
+  options: any; // Consider defining a stricter type based on actual options structure
   weight: number;
   is_required: boolean;
-  order_index?: number | null;
+  order_index: number | null;
+  type: Enums['question_type']; // Use the enum type
 }
 
 export interface Response {
@@ -26,30 +34,54 @@ export interface Response {
   evidence_urls?: string[] | null;
   reviewed_by?: string | null;
   review_date?: string | null;
+  vendor_id?: string | null; // Added vendor_id
+}
+
+export interface AssignedVendor {
+  id: string;
+  name: string;
+  status: string | null; // Allow null status
 }
 
 export interface Evaluation {
   id: string;
   title: string;
-  description: string;
-  vendor_id: string | null;
+  description: string | null;
+  vendor_id?: string | null; // Keep optional if direct link is still used sometimes
   vendor_name?: string;
-  vendors?: Array<{
-    id: string;
-    name: string;
-    status?: string;
-  }>;
+  vendors?: AssignedVendor[]; // Array of assigned vendors
   evaluator_id: string;
-  status: EvaluationStatus;
-  progress: number;
+  status: Enums['evaluation_status'] | null;
+  progress: number | null;
   total_score: number | null;
-  start_date: string;
-  end_date: string;
+  start_date: string | null;
+  end_date: string | null;
   created_at: string;
-  updated_at: string;
-  questions?: Question[];
-  responses?: Response[];
-  metadata?: any;
+  updated_at: string | null;
+  questions: Question[]; // Questions associated via evaluation_questions
+  responses: Response[]; // Responses associated with this evaluation
+  metadata: any; // Use specific type if metadata structure is known
+}
+
+// Interface for the object structure within getEvaluations loop
+interface ProcessedEvaluationData {
+  id: string;
+  title: string;
+  description: string | null;
+  vendor_id: string | null;
+  vendor_name: string;
+  evaluator_id: string;
+  status: Enums['evaluation_status'] | null;
+  progress: number | null;
+  total_score: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  created_at: string;
+  updated_at: string | null;
+  questions: Question[];
+  responses: Response[];
+  metadata: any;
+  vendors?: AssignedVendor[]; // Make vendors optional here initially
 }
 
 export interface DBQuestion extends Omit<Question, 'weight' | 'is_required'> {
@@ -226,7 +258,7 @@ export async function getEvaluations(
       }
     }
 
-    const processedData = data?.map((evaluation: any) => {
+    const processedData: ProcessedEvaluationData[] = data?.map((evaluation: any) => {
       let vendorName = 'Proveedor no asignado';
       if (evaluation.vendors) {
         if (Array.isArray(evaluation.vendors)) {
@@ -239,8 +271,8 @@ export async function getEvaluations(
       return {
         id: evaluation.id,
         title: evaluation.title || 'Evaluación sin título',
-        description: evaluation.description || 'Sin descripción',
-        vendor_id: evaluation.vendor_id,
+        description: evaluation.description || null,
+        vendor_id: evaluation.vendor_id || null,
         vendor_name: vendorName,
         evaluator_id: evaluation.evaluator_id,
         status: evaluation.status || 'draft',
@@ -273,8 +305,8 @@ export async function getEvaluations(
       }
 
       evaluation.vendors = (assignedVendors || []).map(av => ({
-        id: av.vendors.id,
-        name: av.vendors.name,
+        id: (av.vendors as { id: string }).id,
+        name: (av.vendors as { name: string }).name,
         status: av.status
       }));
     }
@@ -319,25 +351,37 @@ export async function getEvaluationDetails(
       console.error("Error obteniendo proveedores asignados:", vendorsError);
     }
 
-    const { data: dbQuestions, error: questionsError } = await client
-      .from('questions')
-      .select('*')
-      .eq('metadata->>evaluation_id', evaluationId)
+    // Get questions associated with this evaluation via the join table
+    const { data: evaluationQuestionsData, error: eqError } = await client
+      .from('evaluation_questions')
+      .select(`
+        order_index,
+        question:questions (*)
+      `)
+      .eq('evaluation_id', evaluationId)
       .order('order_index', { ascending: true });
 
-    if (questionsError) throw questionsError;
+    if (eqError) throw eqError;
 
-    const questions: Question[] = (dbQuestions || []).map((q: Tables['questions']['Row']) => ({
-      id: q.id,
-      category: q.category,
-      subcategory: q.subcategory,
-      question_text: q.question_text,
-      description: q.description,
-      options: q.options,
-      weight: q.weight || 0,
-      is_required: q.is_required || false,
-      order_index: q.order_index
-    }));
+    // Process the fetched questions
+    const questions: Question[] = (evaluationQuestionsData || []).map((eq) => {
+      if (!eq.question) {
+        console.warn("Found evaluation_question link with null question data for evaluation:", evaluationId);
+        return null;
+      }
+      return {
+        id: eq.question.id,
+        category: eq.question.category,
+        subcategory: eq.question.subcategory,
+        question_text: eq.question.question_text,
+        description: eq.question.description,
+        options: eq.question.options,
+        weight: eq.question.weight || 0,
+        is_required: eq.question.is_required ?? false,
+        order_index: eq.order_index,
+        type: eq.question.type
+      };
+    }).filter((q): q is Question => q !== null);
 
     const { data: responses, error: responsesError } = await client
       .from('responses')
@@ -400,14 +444,14 @@ interface CreateEvaluationData {
   };
   vendor_ids?: string[]; // Array of vendor IDs to assign
   questions: {
-    id: string;
-    type: string;
+    id?: string; // Optional ID if reusing existing?
+    type: Enums['question_type'];
     text: string;
     required: boolean;
     weight: number;
     order: number;
     category?: string;
-    options?: any;
+    options?: any; // Consider a stricter type
   }[];
 }
 
@@ -430,21 +474,22 @@ export async function createEvaluation(
       throw new Error("No se pudo determinar el ID del usuario");
     }
 
-    const evaluationId = uuidv4();
+    const newEvaluationId = uuidv4();
 
+    // 1. Insert the main evaluation record
     const { error: evaluationError } = await client
       .from('evaluations')
       .insert({
-        id: evaluationId,
+        id: newEvaluationId, // Use the generated ID
         title: evaluationData.title,
         description: evaluationData.description,
         evaluator_id: currentUserId,
-        status: 'draft',
+        status: 'draft', // Default status
         progress: 0,
         start_date: new Date(evaluationData.start_date).toISOString(),
         end_date: new Date(evaluationData.end_date).toISOString(),
         total_score: null,
-        metadata: {
+        metadata: { // Keep relevant metadata here
           type: evaluationData.type,
           is_anonymous: evaluationData.is_anonymous,
           settings: evaluationData.settings
@@ -453,36 +498,75 @@ export async function createEvaluation(
 
     if (evaluationError) throw evaluationError;
 
-    if (evaluationData.questions.length > 0) {
-      const questionsToInsert = evaluationData.questions.map(question => ({
-        id: question.id || uuidv4(),
-        question_text: question.text,
-        category: question.category || 'general',
-        subcategory: null,
-        description: null,
-        options: formatQuestionOptions(question),
-        weight: question.weight,
-        is_required: question.required,
-        order_index: question.order,
-        validation_rules: null,
-        metadata: { evaluation_id: evaluationId },
-        type: question.type
-      }));
+    // 2. Handle Questions: Create globally then link
+    if (evaluationData.questions && evaluationData.questions.length > 0) {
+      const questionsToInsertGlobally: Tables['questions']['Insert'][] = evaluationData.questions.map(question => {
+        // Validate type
+        const questionType: Enums['question_type'] | undefined =
+          question.type === 'escala 1-5' || question.type === 'si/no/no aplica'
+            ? question.type
+            : undefined;
 
-      const { error: questionsError } = await client
-        .from('questions')
-        .insert(questionsToInsert);
+        if (!questionType) {
+          console.error(`Tipo de pregunta inválido o faltante para la pregunta: ${question.text}. Saltando.`);
+          return null; // Skip invalid questions
+        }
 
-      if (questionsError) {
-        console.error("Error insertando preguntas, evaluación creada:", evaluationId);
-        throw questionsError;
+        return {
+          id: question.id || uuidv4(), // Allow providing ID or generate new one
+          question_text: question.text,
+          category: question.category || 'general',
+          // Include other necessary fields for 'questions' table
+          subcategory: null, // Add default or check input if subcategory is used
+          description: null, // Add default or check input
+          options: formatQuestionOptions(question), // Ensure this formats correctly
+          weight: question.weight,
+          is_required: question.required,
+          order_index: question.order, // Note: order_index is in evaluation_questions now primarily
+          type: questionType
+          // Removed metadata: { evaluation_id: newEvaluationId }
+        };
+      }).filter(q => q !== null) as Tables['questions']['Insert'][]; // Filter out skipped and assert type
+
+      if (questionsToInsertGlobally.length > 0) {
+        // 2a. Insert into global 'questions' table
+        const { data: insertedQuestions, error: questionsError } = await client
+          .from('questions')
+          .insert(questionsToInsertGlobally)
+          .select('id'); // Select the IDs of the inserted questions
+
+        if (questionsError) {
+          console.error("Error insertando preguntas globales, evaluación creada:", newEvaluationId);
+          // Consider rolling back evaluation creation or logging inconsistency
+          throw questionsError;
+        }
+
+        // 2b. Link questions to the evaluation in 'evaluation_questions'
+        const questionLinks = (insertedQuestions || []).map((q, index) => ({
+          evaluation_id: newEvaluationId,
+          question_id: q.id,
+          // Use order from original input array if available
+          order_index: evaluationData.questions[index]?.order
+        }));
+
+        if (questionLinks.length > 0) {
+          const { error: linkError } = await client
+            .from('evaluation_questions')
+            .insert(questionLinks);
+
+          if (linkError) {
+            console.error("Error creando enlaces evaluation_questions:", linkError);
+            // Consider implications of partial success
+            throw linkError;
+          }
+        }
       }
     }
 
-    // If vendors are specified, assign them to the evaluation
+    // 3. Assign Vendors (existing logic)
     if (evaluationData.vendor_ids && evaluationData.vendor_ids.length > 0) {
       const vendorAssignments = evaluationData.vendor_ids.map(vendorId => ({
-        evaluation_id: evaluationId,
+        evaluation_id: newEvaluationId,
         vendor_id: vendorId,
         assigned_by: currentUserId,
         assigned_at: new Date().toISOString()
@@ -494,11 +578,12 @@ export async function createEvaluation(
 
       if (assignmentError) {
         console.error("Error asignando proveedores a la evaluación:", assignmentError);
+        // Consider implications
         throw assignmentError;
       }
     }
 
-    return { data: { id: evaluationId }, error: null };
+    return { data: { id: newEvaluationId }, error: null };
   } catch (error) {
     console.error('Error creating evaluation:', error);
     return { data: null, error: error as Error };
@@ -521,19 +606,28 @@ interface UpdateEvaluationData {
       notify_on_submit: boolean;
     };
   };
-  vendor_ids?: string[]; // Array of vendor IDs to assign
-  questions: {
+  vendor_ids?: string[] | null; // Allow null for vendor updates
+  questions?: {
     id: string;
-    type: string;
+    type: Enums['question_type'];
     text: string;
     required: boolean;
     weight: number;
     order: number;
     category?: string;
+    subcategory?: string | null;
+    description?: string | null;
     options?: any;
-    answerOptions?: { id: string; text: string }[];
+    answerOptions?: AnswerOption[];
     isNew?: boolean;
     isDeleted?: boolean;
+  }[];
+  responses?: {
+    question_id: string;
+    response_value: string;
+    answer?: Enums['answer_enum'] | null;
+    notes?: string | null;
+    evidence_urls?: string[] | null;
   }[];
 }
 
@@ -543,196 +637,244 @@ export async function updateEvaluation(
 ): Promise<{ data: { id: string } | null; error: Error | null }> {
   try {
     let userId: string;
+    let userVendorId: string | null = null; // Variable to store the vendor ID
+    let isAdminUser = false; // Flag for admin permission
     try {
       const { data: { user }, error: authError } = await client.auth.getUser();
       if (authError) throw authError;
       if (!user) throw new Error("No has iniciado sesión");
       userId = user.id;
       console.log("[DEBUG updateEvaluation] Usuario autenticado ID:", userId);
-    } catch (error) {
-      console.error('[DEBUG updateEvaluation] Error de autenticación:', error);
-      throw new Error("No has iniciado sesión. Por favor, inicia sesión nuevamente.");
-    }
 
-    const { data: userData, error: userError } = await client
-      .from('users')
-      .select('role_id')
-      .eq('id', userId)
-      .single();
+      const { data: publicUserData, error: publicUserError } = await client
+        .from('users')
+        .select('vendor_id, role_id')
+        .eq('id', userId)
+        .single();
 
-    if (userError) throw userError;
-    if (!userData?.role_id) throw new Error('Usuario sin rol asignado');
+      if (publicUserError) throw new Error("Error al obtener datos del perfil de usuario.");
+      if (!publicUserData) throw new Error("Perfil de usuario no encontrado en public.users.");
 
-    const { data: roleData, error: roleError } = await client
-      .from('roles')
-      .select('name')
-      .eq('id', userData.role_id)
-      .single();
+      userVendorId = publicUserData.vendor_id;
+      const userRoleId = publicUserData.role_id;
+      console.log(`[DEBUG updateEvaluation] User Role ID: ${userRoleId}, Vendor ID: ${userVendorId}`);
 
-    if (roleError) throw roleError;
-    if (!roleData || roleData.name !== 'admin') {
-      console.error("[DEBUG updateEvaluation] Permiso denegado. Rol:", roleData?.name);
-      throw new Error('No tienes permisos para editar evaluaciones');
-    }
-    console.log("[DEBUG updateEvaluation] Permiso concedido. Rol:", roleData.name);
-    console.log("[DEBUG updateEvaluation] Payload recibido completo:", JSON.stringify(evaluationData, null, 2));
+      if (!userRoleId) throw new Error('Usuario sin rol asignado');
+      const { data: roleData, error: roleError } = await client
+        .from('roles')
+        .select('name')
+        .eq('id', userRoleId)
+        .single();
 
-    console.log("[DEBUG updateEvaluation] Metadata a actualizar en evaluations:", JSON.stringify(evaluationData.metadata, null, 2));
+      if (roleError) throw roleError;
 
-    const { error: evaluationError } = await client
-      .from('evaluations')
-      .update({
-        title: evaluationData.title,
-        description: evaluationData.description,
-        start_date: new Date(evaluationData.start_date).toISOString(),
-        end_date: new Date(evaluationData.end_date).toISOString(),
-        metadata: evaluationData.metadata
-      })
-      .eq('id', evaluationData.id);
+      // Allow admin or evaluator to update core evaluation data
+      // Suppliers might only update responses (handled later)
+      isAdminUser = roleData?.name === 'admin';
+      const isEvaluator = roleData?.name === 'evaluator';
 
-    if (evaluationError) {
-      console.error("[DEBUG updateEvaluation] Error actualizando tabla evaluations:", JSON.stringify(evaluationError, null, 2));
-    } else {
-      console.log("[DEBUG updateEvaluation] Update en tabla evaluations ejecutado (puede que sin cambios si los datos eran iguales).");
-    }
-
-    // Update vendor assignments if specified
-    if (evaluationData.vendor_ids) {
-      // First, get current assignments
-      const { data: currentAssignments, error: getAssignmentsError } = await client
-        .from('evaluation_vendors')
-        .select('vendor_id')
-        .eq('evaluation_id', evaluationData.id);
-
-      if (getAssignmentsError) {
-        console.error("[DEBUG updateEvaluation] Error obteniendo asignaciones actuales:", getAssignmentsError);
-        throw getAssignmentsError;
-      }
-
-      // Identify vendors to add and remove
-      const currentVendorIds = (currentAssignments || []).map(a => a.vendor_id);
-      const vendorsToAdd = evaluationData.vendor_ids.filter(id => !currentVendorIds.includes(id));
-      const vendorsToRemove = currentVendorIds.filter(id => !evaluationData.vendor_ids.includes(id));
-
-      // Remove unselected vendors
-      if (vendorsToRemove.length > 0) {
-        const { error: removeError } = await client
-          .from('evaluation_vendors')
-          .delete()
-          .eq('evaluation_id', evaluationData.id)
-          .in('vendor_id', vendorsToRemove);
-
-        if (removeError) {
-          console.error("[DEBUG updateEvaluation] Error eliminando asignaciones:", removeError);
-          throw removeError;
+      if (!isAdminUser && !isEvaluator) {
+        // If also not a supplier submitting responses, deny
+        // Logic below handles supplier response submission specifically
+        if (!userVendorId) {
+          console.error("[DEBUG updateEvaluation] Permiso denegado. Rol no admin/evaluator y no es proveedor:", roleData?.name);
+          throw new Error('No tienes permisos para editar evaluaciones o enviar respuestas.');
         }
-      }
-
-      // Add new vendors
-      if (vendorsToAdd.length > 0) {
-        const vendorAssignments = vendorsToAdd.map(vendorId => ({
-          evaluation_id: evaluationData.id,
-          vendor_id: vendorId,
-          assigned_by: userId,
-          assigned_at: new Date().toISOString()
-        }));
-
-        const { error: addError } = await client
-          .from('evaluation_vendors')
-          .insert(vendorAssignments);
-
-        if (addError) {
-          console.error("[DEBUG updateEvaluation] Error añadiendo asignaciones:", addError);
-          throw addError;
-        }
-      }
-    }
-
-    const questionsToCreate = evaluationData.questions.filter(q => q.isNew && !q.isDeleted);
-    const questionsToUpdate = evaluationData.questions.filter(q => !q.isNew && !q.isDeleted);
-    const questionsToDelete = evaluationData.questions.filter(q => q.isDeleted && !q.isNew);
-
-    console.log(`[DEBUG updateEvaluation] Preguntas a crear: ${questionsToCreate.length}`);
-    console.log(`[DEBUG updateEvaluation] Preguntas a actualizar: ${questionsToUpdate.length}`);
-    console.log(`[DEBUG updateEvaluation] Preguntas a eliminar: ${questionsToDelete.length}`);
-
-    let questionErrors: any[] = [];
-
-    if (questionsToCreate.length > 0) {
-      const newQuestions = questionsToCreate.map(question => ({
-        id: question.id || uuidv4(),
-        question_text: question.text,
-        category: question.category || 'general',
-        options: formatQuestionOptions(question),
-        weight: question.weight,
-        is_required: question.required,
-        order_index: question.order,
-        metadata: { evaluation_id: evaluationData.id }
-      }));
-      console.log("[DEBUG updateEvaluation] Intentando crear preguntas:", JSON.stringify(newQuestions.map(q => ({ id: q.id, text: q.question_text })), null, 2));
-      const { error: createError } = await client.from('questions').insert(newQuestions);
-      if (createError) {
-        console.error("[DEBUG updateEvaluation] Error creando preguntas:", JSON.stringify(createError, null, 2));
-        questionErrors.push({ operation: 'create', error: createError });
+        // If it's a supplier, allow proceeding but only response updates should occur
+        console.log("[DEBUG updateEvaluation] Usuario es proveedor, solo se procesarán respuestas.");
       } else {
-        console.log("[DEBUG updateEvaluation] Creación de preguntas ejecutada.");
+        console.log("[DEBUG updateEvaluation] Permiso concedido para edición general. Rol:", roleData.name);
+      }
+
+    } catch (error) {
+      console.error('[DEBUG updateEvaluation] Error de autenticación o obtención de perfil:', error);
+      if (error instanceof Error && error.message.includes("No has iniciado sesión")) {
+        throw error;
+      }
+      throw new Error("Error de autenticación o perfil. Por favor, inicia sesión nuevamente.");
+    }
+
+    // --- Update Evaluation Core Fields (Only if Admin/Evaluator) ---
+    // Initialize error variable for core update
+    let evaluationError: Error | null = null;
+    if (isAdminUser || /* isEvaluator - add if evaluators can update core */ false) {
+      console.log("[DEBUG updateEvaluation] Actualizando campos principales de la evaluación...");
+      const { error } = await client
+        .from('evaluations')
+        .update({
+          title: evaluationData.title,
+          description: evaluationData.description,
+          start_date: new Date(evaluationData.start_date).toISOString(),
+          end_date: new Date(evaluationData.end_date).toISOString(),
+          metadata: evaluationData.metadata
+        })
+        .eq('id', evaluationData.id);
+      evaluationError = error; // Assign error result
+
+      if (evaluationError) {
+        console.error("[DEBUG updateEvaluation] Error actualizando tabla evaluations:", JSON.stringify(evaluationError, null, 2));
+      } else {
+        console.log("[DEBUG updateEvaluation] Update en tabla evaluations ejecutado.");
       }
     }
 
-    if (questionsToUpdate.length > 0) {
-      console.log("[DEBUG updateEvaluation] Intentando actualizar preguntas...");
-      for (const question of questionsToUpdate) {
-        const updatePayload = {
-          question_text: question.text,
-          category: question.category || 'general',
-          options: formatQuestionOptions(question),
-          weight: question.weight,
-          is_required: question.required,
-          order_index: question.order
-        };
-        console.log(`[DEBUG updateEvaluation] Actualizando pregunta ID ${question.id}...`);
-        const { error: updateError } = await client
-          .from('questions')
-          .update(updatePayload)
-          .eq('id', question.id);
+    // --- Update Vendor Assignments (Only if Admin/Evaluator) ---
+    if (isAdminUser || /* isEvaluator - add if needed */ false) {
+      if (evaluationData.vendor_ids !== undefined && evaluationData.vendor_ids !== null) {
+        console.log("[DEBUG updateEvaluation] Actualizando asignaciones de vendor...");
+        // Logic to get current assignments, calculate diff, add/remove from evaluation_vendors
+        // ... (This logic seems correct from previous state) ...
+        const { data: currentAssignments, error: getAssignmentsError } = await client
+          .from('evaluation_vendors')
+          .select('vendor_id')
+          .eq('evaluation_id', evaluationData.id);
+        if (getAssignmentsError) throw getAssignmentsError;
+        const currentVendorIds = (currentAssignments || []).map(a => a.vendor_id);
+        const newVendorIds = Array.isArray(evaluationData.vendor_ids) ? evaluationData.vendor_ids : [];
+        const vendorsToAdd = newVendorIds.filter(id => !currentVendorIds.includes(id));
+        const vendorsToRemove = currentVendorIds.filter(id => !newVendorIds.includes(id));
 
-        if (updateError) {
-          console.error(`[DEBUG updateEvaluation] Error actualizando pregunta ${question.id}:`, JSON.stringify(updateError, null, 2));
-          questionErrors.push({ operation: 'update', questionId: question.id, error: updateError });
-        } else {
-          console.log(`[DEBUG updateEvaluation] Actualización pregunta ${question.id} ejecutada.`);
+        // Remove
+        if (vendorsToRemove.length > 0) {
+            const { error: removeError } = await client.from('evaluation_vendors').delete().eq('evaluation_id', evaluationData.id).in('vendor_id', vendorsToRemove);
+            if (removeError) throw removeError;
+          }
+        // Add
+        if (vendorsToAdd.length > 0) {
+            const vendorAssignments = vendorsToAdd.map(vendorId => ({ evaluation_id: evaluationData.id, vendor_id: vendorId, assigned_by: userId, assigned_at: new Date().toISOString() }));
+            const { error: addError } = await client.from('evaluation_vendors').insert(vendorAssignments);
+            if (addError) throw addError;
+          }
+      } else {
+        console.log("[DEBUG updateEvaluation] No se proporcionaron vendor_ids, no se actualizan asignaciones.");
+      }
+    }
+
+    // --- Handle Questions (Only if Admin/Evaluator) ---
+    let questionErrors: any[] = []; // Initialize here
+    if (isAdminUser || /* isEvaluator - add if needed */ false) {
+      const questionsToCreate = evaluationData.questions?.filter(q => q.isNew && !q.isDeleted) || [];
+      const questionsToUpdate = evaluationData.questions?.filter(q => !q.isNew && !q.isDeleted) || [];
+      const questionsToDelete = evaluationData.questions?.filter(q => q.isDeleted && !q.isNew) || [];
+      console.log(`[DEBUG updateEvaluation] Procesando ${questionsToCreate.length} crear, ${questionsToUpdate.length} actualizar, ${questionsToDelete.length} eliminar preguntas/enlaces...`);
+
+      // Create new questions and link them
+      if (questionsToCreate.length > 0) {
+        // ... (Logic to insert into 'questions' then insert into 'evaluation_questions' - seems correct from previous state) ...
+        const newQuestions = questionsToCreate.map(question => { /* map logic */
+          const questionType = question.type; // Assuming type is already validated
+          if (!questionType) return null;
+          return { id: question.id || uuidv4(), question_text: question.text, category: question.category || 'general', options: formatQuestionOptions(question), weight: question.weight, is_required: question.required, order_index: question.order, type: questionType, metadata: {} };
+        }).filter(q => q !== null);
+
+        if (newQuestions.length > 0) {
+          const { data: insertedQs, error: createError } = await client.from('questions').insert(newQuestions as any).select('id');
+          if (createError) questionErrors.push({ op: 'createQ', error: createError });
+          else {
+            const links = (insertedQs || []).map((q, idx) => ({ evaluation_id: evaluationData.id, question_id: q.id, order_index: questionsToCreate[idx].order }));
+            const { error: linkError } = await client.from('evaluation_questions').insert(links);
+            if (linkError) questionErrors.push({ op: 'linkQ', error: linkError });
+          }
         }
       }
+
+      // Update existing questions (global definition)
+      if (questionsToUpdate.length > 0) {
+        // ... (Logic to update 'questions' table - seems correct from previous state) ...
+        const updatePromises = questionsToUpdate.map(question => { /* map logic to build updatePayload */
+          const questionType = question.type;
+          if (!questionType) return Promise.resolve();
+          const updatePayload = { /* build payload */ question_text: question.text, category: question.category, subcategory: question.subcategory, description: question.description, options: formatQuestionOptions(question), weight: question.weight, is_required: question.required, order_index: question.order, type: questionType };
+          if (Object.keys(updatePayload).length === 0) return Promise.resolve();
+          return client.from('questions').update(updatePayload as any).eq('id', question.id);
+        });
+        const results = await Promise.allSettled(updatePromises);
+        results.forEach((r, i) => { if (r.status === 'rejected') questionErrors.push({ op: 'updateQ', id: questionsToUpdate[i].id, error: r.reason }); });
+      }
+
+      // Unlink (delete from evaluation_questions) questions marked for deletion
+      if (questionsToDelete.length > 0) {
+        // ... (Logic to delete from 'evaluation_questions' - seems correct from previous state) ...
+        const idsToUnlink = questionsToDelete.map(q => q.id);
+        const { error: unlinkError } = await client.from('evaluation_questions').delete().eq('evaluation_id', evaluationData.id).in('question_id', idsToUnlink);
+        if (unlinkError) questionErrors.push({ op: 'unlinkQ', error: unlinkError });
+        }
     }
 
-    if (questionsToDelete.length > 0) {
-      const questionIds = questionsToDelete.map(q => q.id);
-      console.log("[DEBUG updateEvaluation] Intentando eliminar preguntas IDs:", questionIds);
-      const { error: deleteError } = await client
+    // --- Handle Response Submission/Update (Suppliers or Admins/Evaluators) ---
+    if (evaluationData.responses && Array.isArray(evaluationData.responses) && evaluationData.responses.length > 0) {
+      const submitterVendorId = userVendorId; // Use the logged-in user's vendor ID
+
+      // Ensure the user submitting responses is actually a vendor
+      if (!submitterVendorId) {
+        // This case should ideally be caught by the initial permission check if only suppliers can submit
+        console.error("[DEBUG updateEvaluation] Intento de envío de respuestas por usuario sin vendor_id asociado.");
+        throw new Error("Usuario no asociado a un proveedor no puede enviar respuestas.");
+      }
+      console.log(`[DEBUG updateEvaluation] Procesando ${evaluationData.responses.length} respuestas para Vendor ID: ${submitterVendorId}`);
+
+      // Fetch question weights needed for score calculation
+      const questionIds = evaluationData.responses.map(r => r.question_id).filter(id => !!id);
+      const { data: questionsData, error: qError } = await client
         .from('questions')
-        .delete()
+        .select('id, weight, type') // Also get type for scoring logic
         .in('id', questionIds);
 
-      if (deleteError) {
-        console.error("[DEBUG updateEvaluation] Error eliminando preguntas:", JSON.stringify(deleteError, null, 2));
-        questionErrors.push({ operation: 'delete', ids: questionIds, error: deleteError });
-      } else {
-        console.log("[DEBUG updateEvaluation] Eliminación de preguntas ejecutada.");
+      if (qError) throw new Error("Error al obtener datos de preguntas para puntaje.");
+      const questionInfoMap = new Map(questionsData?.map(q => [q.id, { weight: q.weight || 0, type: q.type }]));
+
+      const responsesToUpsert: Tables['responses']['Insert'][] = evaluationData.responses.map(response => {
+        const questionInfo = questionInfoMap.get(response.question_id);
+        const questionWeight = questionInfo?.weight ?? 0;
+        const questionType = questionInfo?.type;
+
+        // Calculate score based on type and response_value/answer
+        let calculatedScore = calculateResponseScore(response, questionWeight, questionType);
+
+        // Prepare payload for upsert, ensure type compatibility
+        const upsertPayload: Tables['responses']['Insert'] = {
+          evaluation_id: evaluationData.id,
+          question_id: response.question_id,
+          vendor_id: submitterVendorId,
+          response_value: response.response_value,
+          answer: response.answer, // Use the enum type from UpdateEvaluationData
+          notes: response.notes,
+          evidence_urls: response.evidence_urls,
+          score: calculatedScore
+        };
+        return upsertPayload;
+      }).filter(r => !!r.question_id); // Filter out any potential invalid entries
+
+      if (responsesToUpsert.length > 0) {
+        console.log("[DEBUG updateEvaluation] Intentando Upsert para respuestas:", responsesToUpsert.length);
+        const { error: upsertError } = await client
+          .from('responses')
+          .upsert(responsesToUpsert, {
+            onConflict: 'evaluation_id, question_id, vendor_id'
+          });
+
+        if (upsertError) {
+          console.error("[DEBUG updateEvaluation] Error en upsert de respuestas:", upsertError);
+          throw new Error(`Error al guardar respuestas: ${upsertError.message}`);
+        }
+        console.log("[DEBUG updateEvaluation] Upsert de respuestas completado.");
+
+        // TODO: After successful response upsert, recalculate and update evaluation total_score and progress
+        // This might involve fetching all responses for this vendor/evaluation again
+        // Or perform calculation client-side before calling update, or use a DB function.
+        console.warn("[TODO] Recalcular y actualizar evaluation.total_score y evaluation.progress después de guardar respuestas.")
+
       }
     }
 
-    if (evaluationError) {
-      throw evaluationError;
-    }
+    // Throw combined errors if any occurred
+    if (evaluationError) throw evaluationError; // Throw error from core update if it happened
     if (questionErrors.length > 0) {
-      console.error("[DEBUG updateEvaluation] Errores durante operaciones de preguntas:", questionErrors);
-      const errorMessages = questionErrors.map(e =>
-        `Operación ${e.operation}${e.questionId ? ' en pregunta ' + e.questionId : ''}: ${e.error.message}`
-      ).join('; \n');
+      const errorMessages = questionErrors.map(e => `Op:${e.op} Id:${e.id || 'N/A'} Msg:${e.error.message}`).join('; ');
       throw new Error(`Errores al procesar preguntas: ${errorMessages}`);
     }
 
-    console.log("[DEBUG updateEvaluation] Todas las operaciones completadas (aparentemente) sin errores lanzados.");
+    console.log("[DEBUG updateEvaluation] Operación completada para Evaluación ID:", evaluationData.id);
     return { data: { id: evaluationData.id }, error: null };
 
   } catch (error) {
@@ -885,4 +1027,35 @@ export async function assignVendorsToEvaluation(
       error: error instanceof Error ? error : new Error('Error desconocido al asignar proveedores')
     };
   }
+}
+
+// Helper function for score calculation (extracted for clarity)
+function calculateResponseScore(
+  response: { response_value: string; answer?: Enums['answer_enum'] | null },
+  questionWeight: number,
+  questionType?: Enums['question_type'] | null
+): number {
+  let score = 0;
+  try {
+    if (questionType === 'si/no/no aplica') {
+      if (response.answer === 'Yes') score = questionWeight;
+      else if (response.answer === 'No') score = 0;
+      else if (response.answer === 'N/A') score = 0; // Or handle N/A differently
+
+    } else if (questionType === 'escala 1-5') {
+      const scaleValue = parseInt(response.response_value);
+      if (!isNaN(scaleValue)) {
+        // Example scaling: 1=0, 2=0.25*W, 3=0.5*W, 4=0.75*W, 5=1*W
+        score = Math.max(0, (scaleValue - 1) / 4) * questionWeight;
+      }
+    } else {
+      // Default or handle other types
+      console.warn(`Unhandled question type for score calculation: ${questionType}`);
+    }
+  } catch (e) {
+    console.error("Error calculating score for response:", response, e);
+    score = 0; // Default to 0 on error
+  }
+  // Ensure score is not negative and potentially cap at weight if needed
+  return Math.max(0, score);
 }

@@ -72,7 +72,6 @@ interface Evaluation {
   title: string;
   description: string;
   type: string;
-  vendor_id: string;
   evaluator_id: string;
   evaluator_name: string;
   evaluator_role: string;
@@ -83,7 +82,6 @@ interface Evaluation {
   is_anonymous: boolean;
   created_at: string;
   updated_at: string;
-  categories: Category[];
   comments: Comment[];
   settings: {
     allow_partial_save: boolean;
@@ -91,8 +89,7 @@ interface Evaluation {
     show_progress: boolean;
     notify_on_submit: boolean;
   };
-  questions: Question[];
-  [key: string]: string | number | boolean | null | undefined | Category[] | Comment[] | Question[] | { allow_partial_save: boolean; require_comments: boolean; show_progress: boolean; notify_on_submit: boolean; }; // Index signature for dynamic access
+  [key: string]: string | number | boolean | null | undefined | Comment[] | { allow_partial_save: boolean; require_comments: boolean; show_progress: boolean; notify_on_submit: boolean; };
 }
 
 interface Recommendation {
@@ -421,71 +418,38 @@ export const mockVendors: Vendor[] = [
 export const mockEvaluations: Evaluation[] = [
   {
     id: "eval-1",
-    title: "Evaluación Cumplimiento Ley Datos Personales",
-    description: "Evaluación completa de estándares de calidad y procesos",
+    title: "Evaluación Anual de Proveedor TI",
+    description: "Evaluación del desempeño y cumplimiento del proveedor de TI",
     type: "performance",
-    vendor_id: "vendor-1",
     evaluator_id: "user-1",
     evaluator_name: "Juan Pérez",
-    evaluator_role: "Gerente de Calidad",
+    evaluator_role: "Gerente de TI",
     start_date: "2025-01-15T00:00:00Z",
-    end_date: "2025-02-15T23:59:59Z",
-    status: "active",
+    end_date: "2025-01-31T23:59:59Z",
+    status: "completed",
     score: 92,
     is_anonymous: false,
-    created_at: "2025-01-14T10:00:00Z",
-    updated_at: "2025-01-15T15:30:00Z",
-    categories: [
-      {
-        name: "Derechos de acceso",
-        score: 95,
-        weight: 0.4,
-        comments: "Excelente control de calidad en todos los procesos"
-      },
-      {
-        name: "Derechos de rectificación",
-        score: 88,
-        weight: 0.3,
-        comments: "Algunas demoras menores en entregas urgentes"
-      },
-      {
-        name: "Gestión de Riesgos y prevención",
-        score: 94,
-        weight: 0.3,
-        comments: "Muy buena atención y respuesta a incidencias"
-      }
-    ],
+    created_at: "2025-01-10T10:00:00Z",
+    updated_at: "2025-01-30T15:30:00Z",
     comments: [
       {
         author: "Juan Pérez",
-        date: "2025-01-16T09:00:00Z",
-        text: "El proveedor ha mostrado una mejora significativa en sus procesos"
+        date: "2025-01-30T15:00:00Z",
+        text: "Proveedor confiable, recomendado"
       }
     ],
     settings: {
       allow_partial_save: true,
-      require_comments: false,
+      require_comments: true,
       show_progress: true,
       notify_on_submit: true
     },
-    questions: [
-      {
-        id: "q1",
-        type: "rating_5",
-        text: "Calidad general del servicio",
-        required: true,
-        weight: 1.0,
-        order: 1,
-        options: {}
-      }
-    ]
   },
   {
     id: "eval-2",
     title: "Evaluación cumplimiento Ley Marco Ciberseguridad",
     description: "Análisis de prácticas sostenibles y responsabilidad ambiental",
     type: "sustainability",
-    vendor_id: "vendor-2",
     evaluator_id: "user-2",
     evaluator_name: "Ana García",
     evaluator_role: "Especialista en Sostenibilidad",
@@ -496,26 +460,6 @@ export const mockEvaluations: Evaluation[] = [
     is_anonymous: true,
     created_at: "2025-01-25T09:00:00Z",
     updated_at: "2025-01-25T09:00:00Z",
-    categories: [
-      {
-        name: "Gestión de Riesgos",
-        score: null,
-        weight: 0.5,
-        comments: "Pendiente de evaluación"
-      },
-      {
-        name: "Eficiencia mitigación",
-        score: null,
-        weight: 0.3,
-        comments: "Pendiente de evaluación"
-      },
-      {
-        name: "Gestión de Informes",
-        score: null,
-        weight: 0.2,
-        comments: "Pendiente de evaluación"
-      }
-    ],
     comments: [],
     settings: {
       allow_partial_save: true,
@@ -523,24 +467,12 @@ export const mockEvaluations: Evaluation[] = [
       show_progress: true,
       notify_on_submit: true
     },
-    questions: [
-      {
-        id: "q1",
-        type: "rating_5",
-        text: "Calidad general del servicio",
-        required: true,
-        weight: 1.0,
-        order: 1,
-        options: {}
-      }
-    ]
   },
   {
     id: "eval-3",
     title: "Evaluación de Seguridad y Cumplimiento",
     description: "Revisión de protocolos de seguridad y cumplimiento normativo",
     type: "compliance",
-    vendor_id: "vendor-3",
     evaluator_id: "user-3",
     evaluator_name: "Carlos Martínez",
     evaluator_role: "Auditor de Seguridad",
@@ -551,26 +483,6 @@ export const mockEvaluations: Evaluation[] = [
     is_anonymous: false,
     created_at: "2025-01-09T08:00:00Z",
     updated_at: "2025-01-20T16:45:00Z",
-    categories: [
-      {
-        name: "Seguridad Laboral",
-        score: 90,
-        weight: 0.4,
-        comments: "Cumplimiento satisfactorio de normativas de seguridad"
-      },
-      {
-        name: "Documentación",
-        score: 85,
-        weight: 0.3,
-        comments: "Algunos documentos requieren actualización"
-      },
-      {
-        name: "Protocolos de Emergencia",
-        score: 86,
-        weight: 0.3,
-        comments: "Procedimientos bien definidos pero requieren más simulacros"
-      }
-    ],
     comments: [
       {
         author: "Carlos Martínez",
@@ -584,24 +496,12 @@ export const mockEvaluations: Evaluation[] = [
       show_progress: true,
       notify_on_submit: true
     },
-    questions: [
-      {
-        id: "q1",
-        type: "rating_5",
-        text: "Calidad general del servicio",
-        required: true,
-        weight: 1.0,
-        order: 1,
-        options: {}
-      }
-    ]
   },
   {
     id: "eval-4",
     title: "Evaluación Cumplimiento y riesgo de Ciberseguridad",
     description: "Análisis detallado de la calidad de materias primas",
     type: "quality",
-    vendor_id: "vendor-4",
     evaluator_id: "user-2",
     evaluator_name: "Ana García",
     evaluator_role: "Especialista en Calidad",
@@ -612,26 +512,6 @@ export const mockEvaluations: Evaluation[] = [
     is_anonymous: false,
     created_at: "2025-01-04T10:00:00Z",
     updated_at: "2025-01-15T17:30:00Z",
-    categories: [
-      {
-        name: "Calidad de Materiales",
-        score: 96,
-        weight: 0.5,
-        comments: "Excelente calidad en todas las muestras analizadas"
-      },
-      {
-        name: "Certificaciones",
-        score: 94,
-        weight: 0.3,
-        comments: "Todas las certificaciones vigentes y actualizadas"
-      },
-      {
-        name: "Trazabilidad",
-        score: 95,
-        weight: 0.2,
-        comments: "Sistema de trazabilidad robusto y bien documentado"
-      }
-    ],
     comments: [
       {
         author: "Ana García",
@@ -645,24 +525,12 @@ export const mockEvaluations: Evaluation[] = [
       show_progress: true,
       notify_on_submit: true
     },
-    questions: [
-      {
-        id: "q1",
-        type: "rating_5",
-        text: "Calidad general del servicio",
-        required: true,
-        weight: 1.0,
-        order: 1,
-        options: {}
-      }
-    ]
   },
   {
     id: "eval-5",
     title: "Evaluación de Riesgos Operativos",
     description: "Análisis de riesgos en la cadena de suministro",
     type: "risk",
-    vendor_id: "vendor-5",
     evaluator_id: "user-1",
     evaluator_name: "Juan Pérez",
     evaluator_role: "Analista de Riesgos",
@@ -673,26 +541,6 @@ export const mockEvaluations: Evaluation[] = [
     is_anonymous: false,
     created_at: "2025-01-19T14:00:00Z",
     updated_at: "2025-01-25T11:45:00Z",
-    categories: [
-      {
-        name: "Riesgos Financieros",
-        score: 75,
-        weight: 0.4,
-        comments: "Algunos indicadores financieros requieren atención"
-      },
-      {
-        name: "Riesgos Operativos",
-        score: 80,
-        weight: 0.3,
-        comments: "Plan de contingencia adecuado pero mejorable"
-      },
-      {
-        name: "Riesgos de Cumplimiento",
-        score: 80,
-        weight: 0.3,
-        comments: "Cumplimiento satisfactorio de requisitos regulatorios"
-      }
-    ],
     comments: [
       {
         author: "Juan Pérez",
@@ -706,17 +554,6 @@ export const mockEvaluations: Evaluation[] = [
       show_progress: true,
       notify_on_submit: true
     },
-    questions: [
-      {
-        id: "q1",
-        type: "rating_5",
-        text: "Calidad general del servicio",
-        required: true,
-        weight: 1.0,
-        order: 1,
-        options: {}
-      }
-    ]
   }
 ];
 
@@ -797,7 +634,6 @@ export const mockRecommendations: Recommendation[] = [
 export const mockQuestions: Question[] = [
   {
     id: "q1",
-    evaluation_id: "eval-1",
     text: "¿Cómo calificaría la calidad general del servicio?",
     type: "rating_5",
     required: true,
@@ -811,7 +647,6 @@ export const mockQuestions: Question[] = [
   },
   {
     id: "q2",
-    evaluation_id: "eval-1",
     text: "¿El proveedor cumple con los plazos de entrega establecidos?",
     type: "yes_no",
     required: true,
@@ -822,7 +657,6 @@ export const mockQuestions: Question[] = [
   },
   {
     id: "q3",
-    evaluation_id: "eval-2",
     text: "Seleccione las áreas que requieren mejora",
     type: "multiple_answer",
     required: false,
