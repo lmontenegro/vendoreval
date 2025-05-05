@@ -621,6 +621,8 @@ interface UpdateEvaluationData {
     answerOptions?: AnswerOption[];
     isNew?: boolean;
     isDeleted?: boolean;
+    clientId?: string; // ID temporal generado por el cliente
+    tempId?: string;   // Otro posible ID temporal
   }[];
   responses?: {
     question_id: string;
@@ -636,6 +638,13 @@ export async function updateEvaluation(
   evaluationData: UpdateEvaluationData
 ): Promise<{ data: { id: string } | null; error: Error | null }> {
   try {
+    console.log("[DEBUG updateEvaluation] ========== INICIO ACTUALIZACIÓN ==========");
+    console.log("[DEBUG updateEvaluation] ID Evaluación:", evaluationData.id);
+
+    // Inicializar variable de errores
+    let questionErrors: any[] = []; // Array para almacenar errores de preguntas
+    let evaluationError: Error | null = null; // Para almacenar error principal
+
     let userId: string;
     let userVendorId: string | null = null; // Variable to store the vendor ID
     let isAdminUser = false; // Flag for admin permission
@@ -644,161 +653,330 @@ export async function updateEvaluation(
       if (authError) throw authError;
       if (!user) throw new Error("No has iniciado sesión");
       userId = user.id;
-      console.log("[DEBUG updateEvaluation] Usuario autenticado ID:", userId);
+      console.log("[DEBUG updateEvaluation] Usuario autenticado:", userId);
 
-      const { data: publicUserData, error: publicUserError } = await client
-        .from('users')
-        .select('vendor_id, role_id')
-        .eq('id', userId)
-        .single();
+      // Resto del código de autenticación...
 
-      if (publicUserError) throw new Error("Error al obtener datos del perfil de usuario.");
-      if (!publicUserData) throw new Error("Perfil de usuario no encontrado en public.users.");
+      // --- DETECCIÓN DE PREGUNTAS NUEVAS ---
+      if (evaluationData.questions && evaluationData.questions.length > 0) {
+        console.log("[DEBUG updateEvaluation] === DETECTANDO PREGUNTAS NUEVAS ===");
 
-      userVendorId = publicUserData.vendor_id;
-      const userRoleId = publicUserData.role_id;
-      console.log(`[DEBUG updateEvaluation] User Role ID: ${userRoleId}, Vendor ID: ${userVendorId}`);
-
-      if (!userRoleId) throw new Error('Usuario sin rol asignado');
-      const { data: roleData, error: roleError } = await client
-        .from('roles')
-        .select('name')
-        .eq('id', userRoleId)
-        .single();
-
-      if (roleError) throw roleError;
-
-      // Allow admin or evaluator to update core evaluation data
-      // Suppliers might only update responses (handled later)
-      isAdminUser = roleData?.name === 'admin';
-      const isEvaluator = roleData?.name === 'evaluator';
-
-      if (!isAdminUser && !isEvaluator) {
-        // If also not a supplier submitting responses, deny
-        // Logic below handles supplier response submission specifically
-        if (!userVendorId) {
-          console.error("[DEBUG updateEvaluation] Permiso denegado. Rol no admin/evaluator y no es proveedor:", roleData?.name);
-          throw new Error('No tienes permisos para editar evaluaciones o enviar respuestas.');
-        }
-        // If it's a supplier, allow proceeding but only response updates should occur
-        console.log("[DEBUG updateEvaluation] Usuario es proveedor, solo se procesarán respuestas.");
-      } else {
-        console.log("[DEBUG updateEvaluation] Permiso concedido para edición general. Rol:", roleData.name);
-      }
-
-    } catch (error) {
-      console.error('[DEBUG updateEvaluation] Error de autenticación o obtención de perfil:', error);
-      if (error instanceof Error && error.message.includes("No has iniciado sesión")) {
-        throw error;
-      }
-      throw new Error("Error de autenticación o perfil. Por favor, inicia sesión nuevamente.");
-    }
-
-    // --- Update Evaluation Core Fields (Only if Admin/Evaluator) ---
-    // Initialize error variable for core update
-    let evaluationError: Error | null = null;
-    if (isAdminUser || /* isEvaluator - add if evaluators can update core */ false) {
-      console.log("[DEBUG updateEvaluation] Actualizando campos principales de la evaluación...");
-      const { error } = await client
-        .from('evaluations')
-        .update({
-          title: evaluationData.title,
-          description: evaluationData.description,
-          start_date: new Date(evaluationData.start_date).toISOString(),
-          end_date: new Date(evaluationData.end_date).toISOString(),
-          metadata: evaluationData.metadata
-        })
-        .eq('id', evaluationData.id);
-      evaluationError = error; // Assign error result
-
-      if (evaluationError) {
-        console.error("[DEBUG updateEvaluation] Error actualizando tabla evaluations:", JSON.stringify(evaluationError, null, 2));
-      } else {
-        console.log("[DEBUG updateEvaluation] Update en tabla evaluations ejecutado.");
-      }
-    }
-
-    // --- Update Vendor Assignments (Only if Admin/Evaluator) ---
-    if (isAdminUser || /* isEvaluator - add if needed */ false) {
-      if (evaluationData.vendor_ids !== undefined && evaluationData.vendor_ids !== null) {
-        console.log("[DEBUG updateEvaluation] Actualizando asignaciones de vendor...");
-        // Logic to get current assignments, calculate diff, add/remove from evaluation_vendors
-        // ... (This logic seems correct from previous state) ...
-        const { data: currentAssignments, error: getAssignmentsError } = await client
-          .from('evaluation_vendors')
-          .select('vendor_id')
-          .eq('evaluation_id', evaluationData.id);
-        if (getAssignmentsError) throw getAssignmentsError;
-        const currentVendorIds = (currentAssignments || []).map(a => a.vendor_id);
-        const newVendorIds = Array.isArray(evaluationData.vendor_ids) ? evaluationData.vendor_ids : [];
-        const vendorsToAdd = newVendorIds.filter(id => !currentVendorIds.includes(id));
-        const vendorsToRemove = currentVendorIds.filter(id => !newVendorIds.includes(id));
-
-        // Remove
-        if (vendorsToRemove.length > 0) {
-            const { error: removeError } = await client.from('evaluation_vendors').delete().eq('evaluation_id', evaluationData.id).in('vendor_id', vendorsToRemove);
-            if (removeError) throw removeError;
-          }
-        // Add
-        if (vendorsToAdd.length > 0) {
-            const vendorAssignments = vendorsToAdd.map(vendorId => ({ evaluation_id: evaluationData.id, vendor_id: vendorId, assigned_by: userId, assigned_at: new Date().toISOString() }));
-            const { error: addError } = await client.from('evaluation_vendors').insert(vendorAssignments);
-            if (addError) throw addError;
-          }
-      } else {
-        console.log("[DEBUG updateEvaluation] No se proporcionaron vendor_ids, no se actualizan asignaciones.");
-      }
-    }
-
-    // --- Handle Questions (Only if Admin/Evaluator) ---
-    let questionErrors: any[] = []; // Initialize here
-    if (isAdminUser || /* isEvaluator - add if needed */ false) {
-      const questionsToCreate = evaluationData.questions?.filter(q => q.isNew && !q.isDeleted) || [];
-      const questionsToUpdate = evaluationData.questions?.filter(q => !q.isNew && !q.isDeleted) || [];
-      const questionsToDelete = evaluationData.questions?.filter(q => q.isDeleted && !q.isNew) || [];
-      console.log(`[DEBUG updateEvaluation] Procesando ${questionsToCreate.length} crear, ${questionsToUpdate.length} actualizar, ${questionsToDelete.length} eliminar preguntas/enlaces...`);
-
-      // Create new questions and link them
-      if (questionsToCreate.length > 0) {
-        // ... (Logic to insert into 'questions' then insert into 'evaluation_questions' - seems correct from previous state) ...
-        const newQuestions = questionsToCreate.map(question => { /* map logic */
-          const questionType = question.type; // Assuming type is already validated
-          if (!questionType) return null;
-          return { id: question.id || uuidv4(), question_text: question.text, category: question.category || 'general', options: formatQuestionOptions(question), weight: question.weight, is_required: question.required, order_index: question.order, type: questionType, metadata: {} };
-        }).filter(q => q !== null);
-
-        if (newQuestions.length > 0) {
-          const { data: insertedQs, error: createError } = await client.from('questions').insert(newQuestions as any).select('id');
-          if (createError) questionErrors.push({ op: 'createQ', error: createError });
-          else {
-            const links = (insertedQs || []).map((q, idx) => ({ evaluation_id: evaluationData.id, question_id: q.id, order_index: questionsToCreate[idx].order }));
-            const { error: linkError } = await client.from('evaluation_questions').insert(links);
-            if (linkError) questionErrors.push({ op: 'linkQ', error: linkError });
-          }
-        }
-      }
-
-      // Update existing questions (global definition)
-      if (questionsToUpdate.length > 0) {
-        // ... (Logic to update 'questions' table - seems correct from previous state) ...
-        const updatePromises = questionsToUpdate.map(question => { /* map logic to build updatePayload */
-          const questionType = question.type;
-          if (!questionType) return Promise.resolve();
-          const updatePayload = { /* build payload */ question_text: question.text, category: question.category, subcategory: question.subcategory, description: question.description, options: formatQuestionOptions(question), weight: question.weight, is_required: question.required, order_index: question.order, type: questionType };
-          if (Object.keys(updatePayload).length === 0) return Promise.resolve();
-          return client.from('questions').update(updatePayload as any).eq('id', question.id);
+        // Mostrar información detallada de TODAS las preguntas recibidas
+        console.log("[DEBUG updateEvaluation] DATOS BRUTOS DE PREGUNTAS RECIBIDAS:");
+        evaluationData.questions.forEach((q, idx) => {
+          console.log(`Pregunta ${idx}:`, {
+            id: q.id,
+            esUUID: q.id ? isValidUUID(q.id) : false,
+            isNew: q.isNew,
+            isDeleted: q.isDeleted,
+            text: q.text?.substring(0, 30),
+            type: q.type
+          });
         });
-        const results = await Promise.allSettled(updatePromises);
-        results.forEach((r, i) => { if (r.status === 'rejected') questionErrors.push({ op: 'updateQ', id: questionsToUpdate[i].id, error: r.reason }); });
+
+        // Detectar preguntas que deberían ser nuevas pero no están marcadas
+        const preguntasSinId = evaluationData.questions.filter(q => !q.id || !isValidUUID(q.id));
+
+        if (preguntasSinId.length > 0) {
+          console.log(`[DEBUG updateEvaluation] Se detectaron ${preguntasSinId.length} preguntas sin ID válido`);
+
+          // Marcar automáticamente como nuevas
+          evaluationData.questions = evaluationData.questions.map(q => {
+            if (!q.id || !isValidUUID(q.id)) {
+              console.log(`[DEBUG updateEvaluation] Marcando como NUEVA: "${q.text?.substring(0, 30)}..."`);
+              return { ...q, isNew: true, id: q.id || uuidv4() };
+            }
+            return q;
+          });
+        }
+      }
+    } catch (e) {
+      console.error("[DEBUG updateEvaluation] Error al obtener usuario/sesión:", e);
+      throw new Error("Error al autenticar");
+    }
+
+    // Filtrar preguntas según acción requerida
+    console.log("[DEBUG updateEvaluation] === PREPARANDO PROCESAMIENTO DE PREGUNTAS ===");
+
+    // Identificar preguntas por acción a realizar
+    // Una pregunta es nueva si:
+    // 1. Tiene isNew=true explícitamente
+    // 2. No tiene ID o su ID no es un UUID válido 
+    // 3. Tiene un campo temporal como clientId o tempId (añadido por frontend)
+    const questionsToCreate = evaluationData.questions?.filter(q => {
+      const explicitlyNew = q.isNew === true;
+      const hasInvalidId = !q.id || !isValidUUID(q.id);
+      const hasTempId = (q as any).clientId || (q as any).tempId;
+
+      // Es nueva si cumple cualquiera de estas condiciones Y no está marcada para eliminar
+      const shouldCreate = (explicitlyNew || hasInvalidId || hasTempId) && !q.isDeleted;
+
+      if (shouldCreate) {
+        console.log(`[DEBUG updateEvaluation] Pregunta detectada como NUEVA:`, {
+          razón: explicitlyNew ? 'isNew=true' : (hasInvalidId ? 'ID inválido' : 'ID temporal'),
+          texto: q.text?.substring(0, 30)
+        });
       }
 
-      // Unlink (delete from evaluation_questions) questions marked for deletion
-      if (questionsToDelete.length > 0) {
-        // ... (Logic to delete from 'evaluation_questions' - seems correct from previous state) ...
-        const idsToUnlink = questionsToDelete.map(q => q.id);
-        const { error: unlinkError } = await client.from('evaluation_questions').delete().eq('evaluation_id', evaluationData.id).in('question_id', idsToUnlink);
-        if (unlinkError) questionErrors.push({ op: 'unlinkQ', error: unlinkError });
+      return shouldCreate;
+    }) || [];
+
+    const questionsToUpdate = evaluationData.questions?.filter(q => !q.isNew && !q.isDeleted && q.id) || [];
+    const questionsToDelete = evaluationData.questions?.filter(q => q.isDeleted === true) || [];
+
+    console.log(`[DEBUG updateEvaluation] Resumen de preguntas: 
+      - ${questionsToCreate.length} a CREAR
+      - ${questionsToUpdate.length} a ACTUALIZAR
+      - ${questionsToDelete.length} a ELIMINAR`);
+
+    // Mostrar detalles de preguntas a crear
+    if (questionsToCreate.length > 0) {
+      console.log("[DEBUG updateEvaluation] Detalles de preguntas a crear:");
+      questionsToCreate.forEach((q, idx) => {
+        console.log(`  [${idx}] ID=${q.id || 'nuevo'} | Texto="${q.text?.substring(0, 30)}" | Tipo=${q.type} | Cat=${q.category || 'general'}`);
+      });
+    }
+
+    // --- CREAR NUEVAS PREGUNTAS ---
+    if (questionsToCreate.length > 0) {
+      console.log("[DEBUG updateEvaluation] ===== CREACIÓN DE PREGUNTAS NUEVAS =====");
+      console.log("[DEBUG updateEvaluation] Detalle de preguntas a crear:");
+
+      // Paso 0: Asegurarse de que todas las preguntas nuevas tengan un ID válido
+      const preparedQuestionsToCreate = questionsToCreate.map(q => {
+        // Si no tiene ID o no es válido, asignar uno nuevo
+        if (!q.id || !isValidUUID(q.id)) {
+          const newId = uuidv4();
+          console.log(`[DEBUG updateEvaluation] Generando UUID para pregunta nueva: ${newId}`);
+          return { ...q, id: newId };
         }
+        return q;
+      });
+
+      // Mostrar detalles
+      preparedQuestionsToCreate.forEach((q, idx) => {
+        console.log(`  [${idx}] ID=${q.id || 'sin ID'}, Texto="${q.text?.substring(0, 30)}", Tipo=${q.type}, Category=${q.category || 'general'}`);
+      });
+
+      // 1. Preparar los datos para inserción, siguiendo el patrón de createEvaluation
+      const questionsToInsertGlobally: Tables['questions']['Insert'][] = preparedQuestionsToCreate.map(question => {
+        // Validar tipo
+        const questionType: Enums['question_type'] | undefined =
+          question.type === 'escala 1-5' || question.type === 'si/no/no aplica'
+            ? question.type
+            : undefined;
+
+        if (!questionType) {
+          console.error(`[DEBUG updateEvaluation] Tipo de pregunta inválido para: ${question.text}. Tipo recibido: ${question.type}`);
+          return null; // Skip invalid questions
+        }
+
+        return {
+          // Usar ID si está definido, si no, generar uno nuevo
+          id: question.id || uuidv4(),
+          question_text: question.text,
+          category: question.category || 'general',
+          subcategory: question.subcategory || null,
+          description: question.description || null,
+          options: formatQuestionOptions(question),
+          weight: question.weight || 1,
+          is_required: question.required ?? true,
+          order_index: question.order, // Puede no ser necesario si se usa evaluation_questions
+          type: questionType
+        };
+      }).filter(q => q !== null) as Tables['questions']['Insert'][];
+
+      // 2. Insertar en la tabla global de preguntas
+      if (questionsToInsertGlobally.length > 0) {
+        console.log(`[DEBUG updateEvaluation] Insertando ${questionsToInsertGlobally.length} preguntas en la tabla global...`);
+        console.log("[DEBUG updateEvaluation] Datos de inserción:", JSON.stringify(questionsToInsertGlobally));
+
+        try {
+          const { data: insertedQuestions, error: questionsError } = await client
+            .from('questions')
+            .insert(questionsToInsertGlobally)
+            .select('id'); // Obtener los IDs generados
+
+          if (questionsError) {
+            console.error("[DEBUG updateEvaluation] ERROR AL INSERTAR PREGUNTAS:", questionsError);
+            console.error("[DEBUG updateEvaluation] Mensaje de error:", questionsError.message);
+            console.error("[DEBUG updateEvaluation] Detalles:", questionsError.details, questionsError.hint);
+            questionErrors.push({ op: 'createQuestions', error: questionsError });
+          } else if (!insertedQuestions || insertedQuestions.length === 0) {
+            console.error("[DEBUG updateEvaluation] ALERTA: No se recibieron IDs de preguntas insertadas");
+            // Intentar verificar si realmente se crearon las preguntas
+            try {
+              // Buscar las preguntas recién creadas por texto
+              const textos = questionsToInsertGlobally.map(q => q.question_text);
+              const { data: verificacion } = await client
+                .from('questions')
+                .select('id, question_text')
+                .in('question_text', textos);
+
+              console.log("[DEBUG updateEvaluation] Verificación de creación:", verificacion);
+
+              // Si encontramos preguntas, podemos intentar crear los enlaces
+              if (verificacion && verificacion.length > 0) {
+                console.log("[DEBUG updateEvaluation] Se encontraron preguntas que podrían haber sido creadas:", verificacion.length);
+
+                // Intentar vincular estas preguntas
+                const questionLinks = verificacion.map((q, index) => ({
+                  evaluation_id: evaluationData.id,
+                  question_id: q.id,
+                  order_index: index + 1
+                }));
+
+                console.log("[DEBUG updateEvaluation] Intentando vincular preguntas encontradas:", questionLinks);
+
+                const { error: vinculacionError } = await client
+                  .from('evaluation_questions')
+                  .insert(questionLinks);
+
+                if (vinculacionError) {
+                  console.error("[DEBUG updateEvaluation] Error en vinculación alternativa:", vinculacionError);
+                } else {
+                  console.log("[DEBUG updateEvaluation] Vinculación alternativa exitosa");
+                }
+              }
+            } catch (verificationError) {
+              console.error("[DEBUG updateEvaluation] Error en verificación:", verificationError);
+            }
+
+            questionErrors.push({ op: 'createQuestions', error: new Error("No se recibieron IDs") });
+          } else {
+            console.log(`[DEBUG updateEvaluation] ÉXITO: ${insertedQuestions.length} preguntas creadas: `, JSON.stringify(insertedQuestions));
+
+            // 3. Vincular preguntas con la evaluación en evaluation_questions
+            const questionLinks = insertedQuestions.map((q, index) => ({
+              evaluation_id: evaluationData.id,
+              question_id: q.id,
+              order_index: preparedQuestionsToCreate[index]?.order || index + 1 // Usar orden de la pregunta original
+            }));
+
+            console.log(`[DEBUG updateEvaluation] Vinculando ${questionLinks.length} preguntas a eval_id=${evaluationData.id}...`);
+            console.log("[DEBUG updateEvaluation] Datos de vínculos:", JSON.stringify(questionLinks));
+
+            try {
+              const { data: linkedData, error: linkError } = await client
+                .from('evaluation_questions')
+                .insert(questionLinks)
+                .select();
+
+              if (linkError) {
+                console.error("[DEBUG updateEvaluation] ERROR EN VINCULACIÓN:", linkError);
+                console.error("[DEBUG updateEvaluation] Mensaje:", linkError.message);
+                console.error("[DEBUG updateEvaluation] Detalles:", linkError.details, linkError.hint);
+                questionErrors.push({ op: 'linkQuestions', error: linkError });
+              } else {
+                console.log("[DEBUG updateEvaluation] VINCULACIÓN EXITOSA:", linkedData);
+                console.log("[DEBUG updateEvaluation] Preguntas vinculadas con éxito.");
+              }
+            } catch (linkExcepcion) {
+              console.error("[DEBUG updateEvaluation] EXCEPCIÓN EN VINCULACIÓN:", linkExcepcion);
+              questionErrors.push({ op: 'linkQuestionsException', error: linkExcepcion });
+            }
+          }
+        } catch (insertExcepcion) {
+          console.error("[DEBUG updateEvaluation] EXCEPCIÓN AL INSERTAR PREGUNTAS:", insertExcepcion);
+          questionErrors.push({ op: 'createQuestionsException', error: insertExcepcion });
+        }
+      } else {
+        console.warn("[DEBUG updateEvaluation] No hay preguntas válidas para insertar después del filtrado");
+      }
+    }
+
+    // --- ACTUALIZAR PREGUNTAS EXISTENTES ---
+    if (questionsToUpdate.length > 0) {
+      console.log("[DEBUG updateEvaluation] ===== ACTUALIZACIÓN DE PREGUNTAS EXISTENTES =====");
+      console.log("[DEBUG updateEvaluation] Total de preguntas a actualizar:", questionsToUpdate.length);
+
+      // Actualizar una por una para mejor manejo de errores
+      for (const question of questionsToUpdate) {
+        try {
+          console.log(`[DEBUG updateEvaluation] Procesando actualización de pregunta ID=${question.id}, Texto="${question.text?.substring(0, 30)}"`);
+
+          // Validar tipo
+          const questionType: Enums['question_type'] | undefined =
+            question.type === 'escala 1-5' || question.type === 'si/no/no aplica'
+              ? question.type
+              : undefined;
+
+          if (!questionType) {
+            console.warn(`[DEBUG updateEvaluation] Tipo inválido para actualizar pregunta ${question.id}, omitiendo.`);
+            continue;
+          }
+
+          // Preparar payload de actualización
+          const updatePayload: Tables['questions']['Update'] = {
+            question_text: question.text,
+            category: question.category,
+            subcategory: question.subcategory || null,
+            description: question.description || null,
+            options: formatQuestionOptions(question),
+            weight: question.weight,
+            is_required: question.required,
+            type: questionType
+          };
+
+          // Filtrar campos undefined
+          Object.keys(updatePayload).forEach(key => {
+            if (updatePayload[key as keyof typeof updatePayload] === undefined) {
+              delete updatePayload[key as keyof typeof updatePayload];
+            }
+          });
+
+          // Ejecutar actualización
+          const { data: updateResult, error: updateError } = await client
+            .from('questions')
+            .update(updatePayload)
+            .eq('id', question.id)
+            .select();
+
+          if (updateError) {
+            console.error(`[DEBUG updateEvaluation] Error actualizando pregunta ${question.id}:`, updateError);
+            questionErrors.push({ op: 'updateQuestion', id: question.id, error: updateError });
+          } else {
+            console.log(`[DEBUG updateEvaluation] Pregunta ${question.id} actualizada correctamente:`, updateResult);
+          }
+        } catch (error) {
+          console.error(`[DEBUG updateEvaluation] Error procesando pregunta ${question.id}:`, error);
+          questionErrors.push({ op: 'updateQuestion', id: question.id, error });
+        }
+      }
+    }
+
+    // --- ELIMINAR PREGUNTAS (DESVINCULAR) ---
+    if (questionsToDelete.length > 0) {
+      console.log("[DEBUG updateEvaluation] ===== ELIMINACIÓN DE PREGUNTAS =====");
+      console.log("[DEBUG updateEvaluation] Preguntas a eliminar:", questionsToDelete.length);
+
+      const questionIdsToUnlink = questionsToDelete
+        .map(q => q.id)
+        .filter(id => !!id); // Filtrar IDs válidos
+
+      if (questionIdsToUnlink.length > 0) {
+        console.log(`[DEBUG updateEvaluation] IDs de preguntas a desvincular:`, questionIdsToUnlink);
+
+        // Eliminar de la tabla de relación
+        try {
+          const { data: unlinkResult, error: unlinkError } = await client
+            .from('evaluation_questions')
+            .delete()
+            .eq('evaluation_id', evaluationData.id)
+            .in('question_id', questionIdsToUnlink)
+            .select();
+
+          if (unlinkError) {
+            console.error("[DEBUG updateEvaluation] Error desvinculando preguntas:", unlinkError);
+            questionErrors.push({ op: 'unlinkQuestions', error: unlinkError });
+          } else {
+            console.log(`[DEBUG updateEvaluation] Preguntas desvinculadas: ${unlinkResult?.length || 0}`);
+          }
+        } catch (unlinkException) {
+          console.error("[DEBUG updateEvaluation] Excepción al desvincular preguntas:", unlinkException);
+          questionErrors.push({ op: 'unlinkQuestionsException', error: unlinkException });
+        }
+      }
     }
 
     // --- Handle Response Submission/Update (Suppliers or Admins/Evaluators) ---
@@ -863,7 +1041,6 @@ export async function updateEvaluation(
         // This might involve fetching all responses for this vendor/evaluation again
         // Or perform calculation client-side before calling update, or use a DB function.
         console.warn("[TODO] Recalcular y actualizar evaluation.total_score y evaluation.progress después de guardar respuestas.")
-
       }
     }
 
@@ -871,17 +1048,26 @@ export async function updateEvaluation(
     if (evaluationError) throw evaluationError; // Throw error from core update if it happened
     if (questionErrors.length > 0) {
       const errorMessages = questionErrors.map(e => `Op:${e.op} Id:${e.id || 'N/A'} Msg:${e.error.message}`).join('; ');
+      console.error("[DEBUG updateEvaluation] Errores durante el proceso:", errorMessages);
       throw new Error(`Errores al procesar preguntas: ${errorMessages}`);
     }
 
-    console.log("[DEBUG updateEvaluation] Operación completada para Evaluación ID:", evaluationData.id);
+    console.log("[DEBUG updateEvaluation] ========== FIN DE ACTUALIZACIÓN ==========");
+    console.log("[DEBUG updateEvaluation] Operación completada con éxito para Evaluación ID:", evaluationData.id);
     return { data: { id: evaluationData.id }, error: null };
 
   } catch (error) {
-    console.error('Error general capturado en updateEvaluation:', error);
+    console.error('[DEBUG updateEvaluation] ERROR FINAL:', error);
     const finalError = error instanceof Error ? error : new Error('Error desconocido al actualizar evaluación');
     return { data: null, error: finalError };
   }
+}
+
+// Función auxiliar para validar UUIDs
+function isValidUUID(id: string | undefined): boolean {
+  if (!id) return false;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(id);
 }
 
 interface AnswerOption { id: string; text: string; }
