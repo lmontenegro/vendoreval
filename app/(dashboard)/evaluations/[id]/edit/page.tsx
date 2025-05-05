@@ -181,7 +181,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
 
             return {
               id: q.id,
-              type: q.options?.type || 'rating_5',
+              type: q.type || 'escala 1-5', // Usar type directamente de la pregunta
               text: q.question_text,
               required: q.is_required,
               weight: q.weight,
@@ -280,7 +280,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
 
   const addQuestion = () => {
     if (!evaluation) return;
-    const defaultType = 'rating_5'; // O usar 'escala 1-5' o 'si/no/no aplica' según corresponda
+    const defaultType = 'escala 1-5'; // Usar tipo válido de questionTypes
     const needsOptions = ['multiple_choice', 'single_choice', 'checkbox'].includes(defaultType);
 
     const newQuestion: Question = {
@@ -712,9 +712,16 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
                           type="number"
                           min="1"
                           max="7"
-                          step="0.1"
-                          value={question.weight}
-                          onChange={(e) => handleQuestionChange(originalIndex, "weight", parseFloat(e.target.value) || 0)}
+                          step="1"
+                          value={Math.round(question.weight)}
+                          onChange={(e) => {
+                            // Convertir a entero y validar rango
+                            let value = parseInt(e.target.value);
+                            if (isNaN(value)) value = 1;
+                            if (value < 1) value = 1;
+                            if (value > 7) value = 7;
+                            handleQuestionChange(originalIndex, "weight", value);
+                          }}
                         />
                       </div>
                       <div className="flex items-center justify-between pt-4">
