@@ -327,9 +327,21 @@ export default function Evaluations() {
                     <Button 
                       variant="ghost" 
                       size="icon"
-                      onClick={() => router.push(`/evaluations/${evaluation.id}/edit`)}
+                      onClick={() => {
+                        const role = userRole || '';
+                        if (role === 'supplier') {
+                          router.push(`/evaluations/${evaluation.id}/respond`);
+                        } else {
+                          router.push(`/evaluations/${evaluation.id}/edit`);
+                        }
+                      }}
+                      aria-label={(userRole || '') === 'supplier' ? "Responder evaluación" : "Editar evaluación"}
                     >
-                      <ArrowUpRight className="w-4 h-4" />
+                      {(userRole || '') === 'supplier' ? (
+                        <CheckCircle2 className="w-4 h-4" />
+                      ) : (
+                          <ArrowUpRight className="w-4 h-4" />
+                      )}
                     </Button>
                   </div>
                 </div>

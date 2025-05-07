@@ -325,106 +325,152 @@ export async function getEvaluationDetails(
   evaluationId: string
 ): Promise<{ data: Evaluation | null; error: Error | null }> {
   try {
-    const { data: evaluation, error: evaluationError } = await client
+    if (!isValidUUID(evaluationId)) {
+      throw new Error("ID de evaluación no válido");
+    }
+
+    // Obtener los datos básicos de la evaluación
+    const { data: evaluationData, error: evaluationError } = await client
       .from('evaluations')
       .select(`
-        *,
-        vendors:vendor_id (name)
+        id,
+        created_at,
+        updated_at,
+        evaluator_id,
+        status,
+        progress,
+        total_score,
+        start_date,
+        end_date,
+        metadata,
+        vendor_id,
+        title,
+        description,
+        vendor:vendor_id(id, name)
       `)
       .eq('id', evaluationId)
       .single();
 
-    if (evaluationError) throw evaluationError;
-    if (!evaluation) throw new Error("Evaluación no encontrada");
+    if (evaluationError) {
+      console.error("Error al obtener detalles de la evaluación:", evaluationError);
+      throw evaluationError;
+    }
 
-    // Get assigned vendors
-    const { data: assignedVendors, error: vendorsError } = await client
+    if (!evaluationData) {
+      throw new Error("Evaluación no encontrada");
+    }
+
+    // Obtener las preguntas específicas de esta evaluación a través de evaluation_questions
+    const { data: evaluationQuestions, error: questionsError } = await client
+      .from('evaluation_questions')
+      .select(`
+        question_id,
+        order_index,
+        questions:question_id (
+          id,
+          category,
+          subcategory,
+          question_text,
+          description,
+          options,
+          weight,
+          is_required,
+          order_index,
+          type
+        )
+      `)
+      .eq('evaluation_id', evaluationId)
+      .order('order_index', { ascending: true, nullsFirst: false });
+
+    if (questionsError) {
+      console.error("Error al obtener preguntas de la evaluación:", questionsError);
+      throw questionsError;
+    }
+
+    // Extraer y formatear las preguntas desde los resultados
+    const questions = evaluationQuestions.map(eq => {
+      const question = eq.questions;
+      return {
+        id: question.id,
+        category: question.category,
+        subcategory: question.subcategory,
+        question_text: question.question_text,
+        description: question.description,
+        options: question.options,
+        weight: question.weight || 1,
+        is_required: question.is_required || false,
+        order_index: eq.order_index || 0,
+        type: question.type
+      };
+    });
+
+    // Obtener las respuestas existentes para esta evaluación
+    const { data: responsesData, error: responsesError } = await client
+      .from('responses')
+      .select(`
+        id,
+        question_id,
+        response_value,
+        score,
+        notes,
+        evidence_urls,
+        reviewed_by,
+        review_date,
+        vendor_id,
+        answer
+      `)
+      .eq('evaluation_id', evaluationId);
+
+    if (responsesError) {
+      console.error("Error al obtener respuestas de la evaluación:", responsesError);
+      throw responsesError;
+    }
+
+    // Obtener los vendors asignados a esta evaluación
+    const { data: vendorsData, error: vendorsError } = await client
       .from('evaluation_vendors')
       .select(`
-        vendor_id,
-        status,
-        vendors:vendor_id (id, name)
+        id,
+        vendor:vendor_id (id, name),
+        status
       `)
       .eq('evaluation_id', evaluationId);
 
     if (vendorsError) {
-      console.error("Error obteniendo proveedores asignados:", vendorsError);
+      console.error("Error al obtener vendors asignados:", vendorsError);
+      throw vendorsError;
     }
 
-    // Get questions associated with this evaluation via the join table
-    const { data: evaluationQuestionsData, error: eqError } = await client
-      .from('evaluation_questions')
-      .select(`
-        order_index,
-        question:questions (*)
-      `)
-      .eq('evaluation_id', evaluationId)
-      .order('order_index', { ascending: true });
-
-    if (eqError) throw eqError;
-
-    // Process the fetched questions
-    const questions: Question[] = (evaluationQuestionsData || []).map((eq) => {
-      if (!eq.question) {
-        console.warn("Found evaluation_question link with null question data for evaluation:", evaluationId);
-        return null;
-      }
-      return {
-        id: eq.question.id,
-        category: eq.question.category,
-        subcategory: eq.question.subcategory,
-        question_text: eq.question.question_text,
-        description: eq.question.description,
-        options: eq.question.options,
-        weight: eq.question.weight || 0,
-        is_required: eq.question.is_required ?? false,
-        order_index: eq.order_index,
-        type: eq.question.type
-      };
-    }).filter((q): q is Question => q !== null);
-
-    const { data: responses, error: responsesError } = await client
-      .from('responses')
-      .select('*')
-      .eq('evaluation_id', evaluationId);
-
-    if (responsesError) throw responsesError;
-
-    let vendorName = 'Proveedor no asignado';
-    if (evaluation.vendors) {
-      vendorName = (evaluation.vendors as any)?.name || 'Proveedor no asignado';
-    }
-
-    // Format assigned vendors
-    const vendors = (assignedVendors || []).map(av => ({
-      id: av.vendors.id,
-      name: av.vendors.name,
-      status: av.status
+    const assignedVendors = vendorsData.map(v => ({
+      id: v.vendor?.id || '',
+      name: v.vendor?.name || '',
+      status: v.status
     }));
 
-    const evaluationWithDetails: Evaluation = {
-      id: evaluation.id,
-      title: evaluation.title || 'Evaluación sin título',
-      description: evaluation.description || 'Sin descripción',
-      vendor_id: evaluation.vendor_id,
-      vendor_name: vendorName,
-      vendors: vendors,
-      evaluator_id: evaluation.evaluator_id,
-      status: evaluation.status || 'draft',
-      progress: evaluation.progress || 0,
-      total_score: evaluation.total_score,
-      start_date: evaluation.start_date || new Date().toISOString(),
-      end_date: evaluation.end_date || new Date().toISOString(),
-      created_at: evaluation.created_at || new Date().toISOString(),
-      updated_at: evaluation.updated_at || new Date().toISOString(),
-      questions: questions,
-      responses: responses || [],
-      metadata: evaluation.metadata || {}
+    // Construir el objeto de evaluación completo
+    const evaluation: Evaluation = {
+      id: evaluationData.id,
+      title: evaluationData.title,
+      description: evaluationData.description,
+      vendor_id: evaluationData.vendor_id,
+      vendor_name: evaluationData.vendor?.name || undefined,
+      vendors: assignedVendors,
+      evaluator_id: evaluationData.evaluator_id,
+      status: evaluationData.status,
+      progress: evaluationData.progress,
+      total_score: evaluationData.total_score,
+      start_date: evaluationData.start_date,
+      end_date: evaluationData.end_date,
+      created_at: evaluationData.created_at || new Date().toISOString(),
+      updated_at: evaluationData.updated_at,
+      questions,
+      responses: responsesData || [],
+      metadata: evaluationData.metadata
     };
 
-    return { data: evaluationWithDetails, error: null };
+    return { data: evaluation, error: null };
   } catch (error) {
-    console.error('Error completo en getEvaluationDetails:', error);
+    console.error("Error en getEvaluationDetails:", error);
     return { data: null, error: error as Error };
   }
 }
