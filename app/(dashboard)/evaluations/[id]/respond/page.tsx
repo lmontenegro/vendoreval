@@ -149,7 +149,13 @@ export default function RespondEvaluation({ params }: { params: { id: string } }
       // Convert responses object to array
       const responsesArray = Object.values(responses).filter(r => r.question_id);
 
-      const newStatus = submitFinal ? 'pending_review' : 'in_progress';
+      console.log("Enviando respuestas:", {
+        responsesArray,
+        status: submitFinal ? 'completed' : 'in_progress',
+        progress
+      });
+
+      const newStatus = submitFinal ? 'completed' : 'in_progress';
 
       const response = await fetch(`/api/evaluations/${params.id}/respond`, {
         method: 'POST',
