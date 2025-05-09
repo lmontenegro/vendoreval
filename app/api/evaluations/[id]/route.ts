@@ -68,12 +68,13 @@ export async function GET(
 
         // Verificar si hay preguntas asociadas a la evaluación
         if (!data.questions || data.questions.length === 0) {
-            console.log("[DEBUG] No hay preguntas asociadas a la evaluación. Verificando manualmente...");
+            console.log("[DEBUG] No hay preguntas asociadas a la evaluación. Obteniendo manualmente...");
 
-            // Consulta manual para verificar si hay preguntas asociadas
+            // Consulta mejorada para obtener todas las preguntas asociadas a la evaluación
             const { data: evalQuestions, error: evalQuestionsError } = await supabase
                 .from("evaluation_questions")
                 .select(`
+                    id,
                     question_id,
                     order_index,
                     questions:question_id (
@@ -86,38 +87,107 @@ export async function GET(
                         weight,
                         is_required,
                         order_index,
+                        validation_rules,
+                        metadata,
                         type
                     )
                 `)
                 .eq("evaluation_id", evaluationId);
 
             if (evalQuestionsError) {
-                console.error("[DEBUG] Error al verificar preguntas manualmente:", evalQuestionsError);
+                console.error("[DEBUG] Error al obtener preguntas manualmente:", evalQuestionsError);
+                return NextResponse.json({
+                    error: "Error al obtener las preguntas de la evaluación",
+                    details: evalQuestionsError
+                }, { status: 500 });
+            }
+
+            console.log("[DEBUG] Preguntas encontradas manualmente:", evalQuestions?.length || 0);
+
+            if (!evalQuestions || evalQuestions.length === 0) {
+                console.log("[DEBUG] No se encontraron preguntas para esta evaluación");
+                // Definir questions como array vacío para evitar problemas en el cliente
+                data.questions = [];
             } else {
-                console.log("[DEBUG] Preguntas encontradas manualmente:", evalQuestions?.length || 0);
-                if (evalQuestions && evalQuestions.length > 0) {
-                    // Formatear las preguntas encontradas
-                    const formattedQuestions = evalQuestions.map(eq => {
+            // Formatear las preguntas encontradas
+                const formattedQuestions = evalQuestions
+                    .filter(eq => eq.questions) // Asegurar que la pregunta existe
+                    .map(eq => {
                         const question = eq.questions;
+                        // Normalizar categoría - usar 'Sin categoría' para categorías vacías o nulas
+                        const category = question.category && question.category.trim() !== ''
+                            ? question.category
+                            : 'Sin categoría';
+
                         return {
                             id: question.id,
-                            category: question.category,
+                            category: category,
                             subcategory: question.subcategory,
                             question_text: question.question_text,
                             description: question.description,
                             options: question.options,
                             weight: question.weight || 1,
-                            is_required: question.is_required || false,
+                            is_required: question.is_required !== null ? question.is_required : true,
                             order_index: eq.order_index || 0,
+                            validation_rules: question.validation_rules,
+                            metadata: question.metadata,
                             type: question.type
                         };
                     });
 
-                    // Agregar las preguntas encontradas a la respuesta
-                    data.questions = formattedQuestions;
-                    console.log("[DEBUG] Preguntas agregadas manualmente a la respuesta:", formattedQuestions.length);
-                }
+                // Agregar las preguntas encontradas a la respuesta
+                data.questions = formattedQuestions;
+                console.log("[DEBUG] Preguntas agregadas manualmente a la respuesta:", formattedQuestions.length);
+                console.log("[DEBUG] Muestra de primera pregunta:", JSON.stringify(formattedQuestions[0]));
             }
+        } else {
+            console.log("[DEBUG] La evaluación ya tiene preguntas asociadas:", data.questions.length);
+        }
+
+        // Obtener las respuestas ya existentes
+        try {
+            console.log("[DEBUG] Obteniendo respuestas existentes para la evaluación");
+
+            // Obtener el ID del vendor del usuario actual
+            const { data: { user } } = await supabase.auth.getUser();
+
+            if (user) {
+                const { data: userData } = await supabase
+                    .from('users')
+                    .select('vendor_id')
+                    .eq('id', user.id)
+                    .single();
+
+                if (userData?.vendor_id) {
+                    console.log("[DEBUG] Buscando respuestas para vendor_id:", userData.vendor_id);
+
+                    const { data: existingResponses, error: responsesError } = await supabase
+                        .from('responses')
+                        .select('*')
+                        .eq('evaluation_id', evaluationId)
+                        .eq('vendor_id', userData.vendor_id);
+
+                    if (responsesError) {
+                        console.error("[DEBUG] Error al obtener respuestas:", responsesError);
+                    } else if (existingResponses && existingResponses.length > 0) {
+                        console.log("[DEBUG] Respuestas encontradas:", existingResponses.length);
+                        data.responses = existingResponses;
+                    } else {
+                        console.log("[DEBUG] No se encontraron respuestas existentes");
+                        data.responses = [];
+                    }
+                } else {
+                    console.log("[DEBUG] Usuario sin vendor_id asignado");
+                    data.responses = [];
+                }
+            } else {
+                console.log("[DEBUG] Usuario no autenticado");
+                data.responses = [];
+            }
+        } catch (responseError) {
+            console.error("[DEBUG] Error al procesar respuestas:", responseError);
+            // No interrumpir el flujo por un error en las respuestas
+            data.responses = [];
         }
 
         return NextResponse.json({ data });
