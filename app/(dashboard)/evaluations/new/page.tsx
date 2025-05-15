@@ -47,6 +47,7 @@ interface Question {
   answerOptions?: AnswerOption[];
   isDeleted?: boolean; 
   isNew?: boolean; // Aunque no se use en el submit de 'new', puede estar en el estado
+  recommendation_text?: string; // Recomendación para esta pregunta
 }
 
 interface Evaluation {
@@ -137,7 +138,8 @@ export default function NewEvaluation() {
       weight: 1,
       order: evaluation.questions.length + 1,
       category: 'general',
-      options: {}
+      options: {},
+      recommendation_text: '' // Inicializar campo de recomendación
     };
 
     setEvaluation(prev => ({
@@ -232,7 +234,8 @@ export default function NewEvaluation() {
               weight: q.weight,
               order: q.order,
               category: q.category || 'general',
-              options: options
+              options: options,
+              recommendation_text: q.recommendation_text || '' // Añadir recomendación
             };
           })
       };
@@ -518,6 +521,16 @@ export default function NewEvaluation() {
                       checked={question.required}
                       onCheckedChange={(checked) => handleQuestionChange(index, "required", checked)}
                     />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>Recomendación</Label>
+                    <Textarea
+                      value={question.recommendation_text || ""}
+                      onChange={(e) => handleQuestionChange(index, "recommendation_text", e.target.value)}
+                      placeholder="Recomendación si la respuesta es No o No Aplica"
+                      rows={3}
+                    />
+                    <p className="text-xs text-muted-foreground">Esta recomendación se mostrará al proveedor si responde "No" o "N/A"</p>
                   </div>
                 </div>
               </div>

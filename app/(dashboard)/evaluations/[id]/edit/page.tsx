@@ -46,6 +46,7 @@ interface Question {
   answerOptions?: AnswerOption[];
   isNew?: boolean;
   isDeleted?: boolean;
+  recommendation_text?: string;
 }
 
 interface Vendor {
@@ -170,6 +171,28 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
           },
           // Formatear las preguntas
           questions: (data.questions || []).map((q: any) => {
+            // Extraer la recomendación de options
+            let recommendationText = '';
+            try {
+              // Manejar options como string o como objeto
+              if (q.options) {
+                const options = typeof q.options === 'string'
+                  ? JSON.parse(q.options)
+                  : q.options;
+
+                if (options && typeof options === 'object') {
+                  recommendationText = options.recommendation_text || '';
+                }
+              }
+
+              // Acceder a recommendation_text directamente si existe en la pregunta
+              if (q.recommendation_text) {
+                recommendationText = q.recommendation_text;
+              }
+            } catch (e) {
+              console.error("Error al extraer recommendation_text:", e);
+            }
+
             // Assume choices are stored in q.options.choices
             // Map them to answerOptions, ensuring each has a unique ID
             const choices = q.options?.choices || [];
@@ -181,7 +204,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
 
             return {
               id: q.id,
-              type: q.type || 'escala 1-5', // Usar type directamente de la pregunta
+              type: q.type || 'si/no/no aplica', // Usar 'si/no/no aplica' por defecto
               text: q.question_text,
               required: q.is_required,
               weight: q.weight,
@@ -190,7 +213,8 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
               options: q.options || {},
               answerOptions: answerOptions,
               isNew: false,
-              isDeleted: false
+              isDeleted: false,
+              recommendation_text: recommendationText // Usar la recomendación extraída
             };
           })
         };
@@ -280,7 +304,7 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
 
   const addQuestion = () => {
     if (!evaluation) return;
-    const defaultType = 'escala 1-5'; // Usar tipo válido de questionTypes
+    const defaultType = 'si/no/no aplica'; // Cambiado a si/no/no aplica por defecto
     const needsOptions = ['multiple_choice', 'single_choice', 'checkbox'].includes(defaultType);
 
     const newQuestion: Question = {
@@ -293,7 +317,8 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
       category: 'general',
       options: {},
       answerOptions: needsOptions ? [{ id: uuidv4(), text: '' }] : [], // Inicializar si se necesita
-      isNew: true
+      isNew: true,
+      recommendation_text: '' // Inicializar campo de recomendación
     };
 
     setHasUnsavedChanges(true);
@@ -402,7 +427,39 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
         .filter(q => !(q.isNew && q.isDeleted))
         .map(q => {
           const { isNew, isDeleted, ...rest } = q;
-          return rest;
+
+          // Asegurarse de que recommendation_text esté dentro de options
+          let options = { ...rest.options };
+
+          // Si options es un string, convertirlo a objeto
+          if (typeof options === 'string') {
+            try {
+              options = JSON.parse(options);
+            } catch (e) {
+              console.error("Error al parsear options:", e);
+              options = {};
+            }
+          }
+
+          // Asegurar que options sea un objeto
+          if (!options || typeof options !== 'object' || Array.isArray(options)) {
+            options = {};
+          }
+
+          // Incluir recommendation_text en options
+          options.recommendation_text = rest.recommendation_text || '';
+
+          console.log(`[DEBUG handleSubmit] Preparando pregunta ${q.id}:`, {
+            text: rest.text,
+            type: rest.type,
+            recommendation_text: rest.recommendation_text || 'no tiene',
+            options: JSON.stringify(options)
+          });
+
+          return {
+            ...rest,
+            options
+          };
         });
 
       // Usar los vendor_ids de la referencia o mantener los existentes si no hay seleccionados
@@ -416,6 +473,21 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
         vendor_ids: vendorIds,
         questions: questionsPayload
       };
+
+      console.log("[DEBUG handleSubmit] Enviando payload con", questionsPayload.length, "preguntas");
+
+      // Logging detallado para verificar campos de recommendation_text
+      questionsPayload.forEach((q, i) => {
+        console.log(`[DEBUG handleSubmit] Verificando datos de pregunta #${i + 1}:`, {
+          id: q.id,
+          text: q.text.substring(0, 30),
+          recommendation_text: q.recommendation_text || 'no tiene',
+          options: {
+            ...q.options,
+            recommendation_text: q.options.recommendation_text || 'no en options'
+          }
+        });
+      });
 
       // Llamar a la API en lugar de la función directa
       const response = await fetch(`/api/evaluations/${evaluation.id}`, {
@@ -777,6 +849,18 @@ export default function EditEvaluation({ params }: { params: { id: string } }) {
                           </Button>
                         </div>
                       )}
+
+                      <div className="space-y-2 pt-4 md:col-span-2">
+                        <Label htmlFor={`q-${question.id}-recommendation`}>Recomendación</Label>
+                        <Textarea
+                          id={`q-${question.id}-recommendation`}
+                          value={question.recommendation_text || ""}
+                          onChange={(e) => handleQuestionChange(originalIndex, "recommendation_text", e.target.value)}
+                          placeholder="Recomendación si la respuesta es No o No Aplica"
+                          rows={3}
+                        />
+                        <p className="text-xs text-muted-foreground">Esta recomendación se mostrará al proveedor si responde "No" o "N/A"</p>
+                      </div>
                     </div>
                   </div>
                 );

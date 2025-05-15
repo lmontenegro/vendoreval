@@ -281,52 +281,55 @@ export type Database = {
       }
       questions: {
         Row: {
-          category: string
-          created_at: string | null
-          description: string | null
           id: string
-          is_required: boolean | null
-          metadata: Json | null
-          options: Json
-          order_index: number | null
-          question_text: string
-          subcategory: string | null
-          type: Database["public"]["Enums"]["question_type"]
+          created_at: string | null
           updated_at: string | null
-          validation_rules: Json | null
+          category: string
+          subcategory: string | null
+          question_text: string
+          description: string | null
+          options: Json
           weight: number
+          is_required: boolean | null
+          order_index: number | null
+          validation_rules: Json | null
+          metadata: Json | null
+          type: Database["public"]["Enums"]["question_type"]
+          recommendation_text: string | null
         }
         Insert: {
-          category: string
-          created_at?: string | null
-          description?: string | null
           id?: string
-          is_required?: boolean | null
-          metadata?: Json | null
-          options?: Json
-          order_index?: number | null
-          question_text: string
-          subcategory?: string | null
-          type: Database["public"]["Enums"]["question_type"]
+          created_at?: string | null
           updated_at?: string | null
+          category: string
+          subcategory?: string | null
+          question_text: string
+          description?: string | null
+          options: Json
+          weight: number
+          is_required?: boolean | null
+          order_index?: number | null
           validation_rules?: Json | null
-          weight?: number
+          metadata?: Json | null
+          type: Database["public"]["Enums"]["question_type"]
+          recommendation_text?: string | null
         }
         Update: {
-          category?: string
-          created_at?: string | null
-          description?: string | null
           id?: string
-          is_required?: boolean | null
-          metadata?: Json | null
-          options?: Json
-          order_index?: number | null
-          question_text?: string
-          subcategory?: string | null
-          type?: Database["public"]["Enums"]["question_type"]
+          created_at?: string | null
           updated_at?: string | null
-          validation_rules?: Json | null
+          category?: string
+          subcategory?: string | null
+          question_text?: string
+          description?: string | null
+          options?: Json
           weight?: number
+          is_required?: boolean | null
+          order_index?: number | null
+          validation_rules?: Json | null
+          metadata?: Json | null
+          type?: Database["public"]["Enums"]["question_type"]
+          recommendation_text?: string | null
         }
         Relationships: []
       }
@@ -341,6 +344,8 @@ export type Database = {
           metadata: Json | null
           priority: number | null
           question_id: string
+          evaluation_question_id: string | null
+          evaluation_vendor_id: string | null
           recommendation_text: string
           resources: Json | null
           response_id: string
@@ -357,6 +362,8 @@ export type Database = {
           metadata?: Json | null
           priority?: number | null
           question_id: string
+          evaluation_question_id?: string | null
+          evaluation_vendor_id?: string | null
           recommendation_text: string
           resources?: Json | null
           response_id: string
@@ -373,6 +380,8 @@ export type Database = {
           metadata?: Json | null
           priority?: number | null
           question_id?: string
+          evaluation_question_id?: string | null
+          evaluation_vendor_id?: string | null
           recommendation_text?: string
           resources?: Json | null
           response_id?: string
@@ -395,6 +404,20 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "recommendations_evaluation_question_id_fkey"
+            columns: ["evaluation_question_id"]
+            isOneToOne: false
+            referencedRelation: "evaluation_questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recommendations_evaluation_vendor_id_fkey"
+            columns: ["evaluation_vendor_id"]
+            isOneToOne: false
+            referencedRelation: "evaluation_vendors"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "recommendations_response_id_fkey"
             columns: ["response_id"]
             isOneToOne: false
@@ -408,6 +431,8 @@ export type Database = {
           answer: Database["public"]["Enums"]["answer_enum"] | null
           created_at: string | null
           evaluation_id: string
+          evaluation_question_id: string | null
+          evaluation_vendor_id: string | null
           evidence_urls: string[] | null
           id: string
           metadata: Json | null
@@ -424,6 +449,8 @@ export type Database = {
           answer?: Database["public"]["Enums"]["answer_enum"] | null
           created_at?: string | null
           evaluation_id: string
+          evaluation_question_id?: string | null
+          evaluation_vendor_id?: string | null
           evidence_urls?: string[] | null
           id?: string
           metadata?: Json | null
@@ -440,6 +467,8 @@ export type Database = {
           answer?: Database["public"]["Enums"]["answer_enum"] | null
           created_at?: string | null
           evaluation_id?: string
+          evaluation_question_id?: string | null
+          evaluation_vendor_id?: string | null
           evidence_urls?: string[] | null
           id?: string
           metadata?: Json | null
@@ -458,6 +487,20 @@ export type Database = {
             columns: ["evaluation_id"]
             isOneToOne: false
             referencedRelation: "evaluations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "responses_evaluation_question_id_fkey"
+            columns: ["evaluation_question_id"]
+            isOneToOne: false
+            referencedRelation: "evaluation_questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "responses_evaluation_vendor_id_fkey"
+            columns: ["evaluation_vendor_id"]
+            isOneToOne: false
+            referencedRelation: "evaluation_vendors"
             referencedColumns: ["id"]
           },
           {

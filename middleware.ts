@@ -193,6 +193,17 @@ function handleProtectedRoutes(req: NextRequest, res: NextResponse, session: any
         req.nextUrl.pathname.startsWith(route)
     );
 
+    // Si es la ruta de recomendaciones, mostrar información de depuración
+    if (req.nextUrl.pathname === '/recommendations' || req.nextUrl.pathname.startsWith('/api/recommendations')) {
+        console.log(`[Middleware Debug] Acceso a ruta: ${req.nextUrl.pathname}`);
+        console.log(`[Middleware Debug] Usuario autenticado: ${!!session}`);
+        if (session) {
+            console.log(`[Middleware Debug] ID de usuario: ${session.user?.id}`);
+            // No registrar el token completo por seguridad, solo confirmar si existe
+            console.log(`[Middleware Debug] Token presente: ${!!session.access_token}`);
+        }
+    }
+
     // Si es una ruta protegida y no hay sesión, redirigir al login
     if (isProtectedRoute && !session) {
         // Para APIs devolver error 401

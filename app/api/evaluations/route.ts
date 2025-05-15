@@ -50,8 +50,16 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Datos de evaluación incompletos' }, { status: 400 });
         }
 
+        // Asegurar que recommendation_text de cada pregunta se pase correctamente
+        // (Este log ayudará a depurar problemas con recomendaciones)
+        console.log(`[DEBUG POST] Procesando ${evaluationData.questions.length} preguntas para evaluación`);
+
+        evaluationData.questions.forEach((q: any, i: number) => {
+            console.log(`[DEBUG POST] Pregunta #${i + 1}: "${q.text?.substring(0, 30)}..."`);
+            console.log(`  - recommendation_text: "${q.recommendation_text || 'no definido'}"`);
+        });
+
         // Llamar al servicio pasando el cliente
-        // No necesitamos pasar userId explícitamente si createEvaluation lo obtiene
         const { data, error } = await createEvaluation(supabase, evaluationData);
 
         if (error) {

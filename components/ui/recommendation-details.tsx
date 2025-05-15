@@ -1,260 +1,212 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { format } from "date-fns";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  BarChart2,
-  Calendar,
   CheckCircle2,
   Clock,
-  FileText,
-  MessageSquare,
-  Target,
+  AlertTriangle,
   XCircle,
+  Calendar,
 } from "lucide-react";
-import { useState } from "react";
+
+type RecommendationStatus = "pending" | "in_progress" | "implemented" | "rejected" | null;
+
+type Recommendation = {
+  id: string;
+  recommendation_text: string;
+  question_text: string;
+  evaluation_id: string;
+  evaluation_title: string;
+  answer: string;
+  response_value: string;
+  priority: number;
+  status: RecommendationStatus;
+  due_date: string | null;
+  created_at: string;
+  evaluation_question_id: string;
+  evaluation_vendor_id: string;
+};
 
 interface RecommendationDetailsProps {
-  recommendation: {
-    id: string;
-    title: string;
-    description: string;
-    priority: string;
-    status: string;
-    timeline: string;
-    metrics: {
-      label: string;
-      value: string;
-      change: number;
-    }[];
-    steps: string[];
-    benefits: string[];
-    relatedRecommendations: {
-      id: string;
-      title: string;
-      status: string;
-    }[];
-  };
-  onStatusChange?: (id: string, status: string) => void;
-  onCommentAdd?: (id: string, comment: string) => void;
+  recommendation: Recommendation;
+  onStatusChange?: (id: string, status: RecommendationStatus) => void;
+  isSupplier?: boolean;
 }
 
 export function RecommendationDetails({
   recommendation,
   onStatusChange,
-  onCommentAdd,
+  isSupplier = false,
 }: RecommendationDetailsProps) {
-  const [comment, setComment] = useState("");
-  const [newStatus, setNewStatus] = useState(recommendation.status);
+  const handleStatusChange = (status: RecommendationStatus) => {
+    if (onStatusChange) {
+      onStatusChange(recommendation.id, status);
+    }
+  };
 
-  const getStatusIcon = (status: string) => {
+  const getPriorityLabel = (priority: number) => {
+    switch (priority) {
+      case 1: return "Alta";
+      case 2: return "Media";
+      default: return "No definida";
+    }
+  };
+
+  const getPriorityClass = (priority: number) => {
+    switch (priority) {
+      case 1: return "text-red-600 bg-red-50";
+      case 2: return "text-blue-600 bg-blue-50";
+      default: return "text-gray-600 bg-gray-50";
+    }
+  };
+
+  const getStatusIcon = (status: RecommendationStatus) => {
     switch (status) {
-      case "completed":
+      case 'implemented':
         return <CheckCircle2 className="w-4 h-4 text-green-600" />;
-      case "in_progress":
+      case 'in_progress':
         return <Clock className="w-4 h-4 text-blue-600" />;
-      case "pending":
-        return <Clock className="w-4 h-4 text-yellow-600" />;
-      case "rejected":
+      case 'pending':
+        return <AlertTriangle className="w-4 h-4 text-yellow-600" />;
+      case 'rejected':
         return <XCircle className="w-4 h-4 text-red-600" />;
       default:
-        return null;
+        return <AlertTriangle className="w-4 h-4 text-yellow-600" />;
     }
   };
 
-  const getStatusLabel = (status: string) => {
+  const getStatusLabel = (status: RecommendationStatus) => {
     switch (status) {
-      case "completed":
-        return "Completada";
-      case "in_progress":
-        return "En Progreso";
-      case "pending":
-        return "Pendiente";
-      case "rejected":
-        return "Rechazada";
+      case 'implemented':
+        return 'Implementada';
+      case 'in_progress':
+        return 'En Progreso';
+      case 'pending':
+        return 'Pendiente';
+      case 'rejected':
+        return 'Rechazada';
       default:
-        return status;
+        return 'Pendiente';
     }
   };
 
-  const handleStatusChange = (status: string) => {
-    setNewStatus(status);
-    onStatusChange?.(recommendation.id, status);
+  const getStatusClass = (status: RecommendationStatus) => {
+    switch (status) {
+      case 'implemented':
+        return 'bg-green-100 text-green-700';
+      case 'in_progress':
+        return 'bg-blue-100 text-blue-700';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-700';
+      case 'rejected':
+        return 'bg-red-100 text-red-700';
+      default:
+        return 'bg-yellow-100 text-yellow-700';
+    }
   };
 
-  const handleCommentSubmit = () => {
-    if (comment.trim()) {
-      onCommentAdd?.(recommendation.id, comment);
-      setComment("");
+  const getAnswerLabel = (answer: string) => {
+    if (!answer) return 'Sin respuesta';
+
+    switch (answer.toLowerCase()) {
+      case 'yes':
+        return 'Sí';
+      case 'no':
+        return 'No';
+      case 'n/a':
+        return 'No Aplica';
+      default:
+        return answer;
+    }
+  };
+
+  const getAnswerClass = (answer: string) => {
+    if (!answer) return 'bg-gray-100 text-gray-700';
+
+    switch (answer.toLowerCase()) {
+      case 'yes':
+        return 'bg-green-100 text-green-700';
+      case 'no':
+        return 'bg-red-100 text-red-700';
+      case 'n/a':
+        return 'bg-gray-100 text-gray-700';
+      default:
+        return 'bg-gray-100 text-gray-700';
     }
   };
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon">
-          <FileText className="w-4 h-4" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-2xl">{recommendation.title}</DialogTitle>
-          <DialogDescription className="text-base">
-            {recommendation.description}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-          {/* Status and Priority */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Estado</span>
-              <Select value={newStatus} onValueChange={handleStatusChange}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pending">Pendiente</SelectItem>
-                  <SelectItem value="in_progress">En Progreso</SelectItem>
-                  <SelectItem value="completed">Completada</SelectItem>
-                  <SelectItem value="rejected">Rechazada</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Prioridad</span>
-              <span className={`px-2 py-1 rounded-full text-xs ${
-                recommendation.priority === "Alta"
-                  ? "bg-red-100 text-red-700"
-                  : recommendation.priority === "Media"
-                  ? "bg-yellow-100 text-yellow-700"
-                  : "bg-blue-100 text-blue-700"
-              }`}>
-                {recommendation.priority}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Plazo</span>
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm">{recommendation.timeline}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Metrics */}
-          <Card className="p-4">
-            <h3 className="font-medium mb-4 flex items-center gap-2">
-              <BarChart2 className="w-4 h-4" /> Métricas Clave
-            </h3>
-            <div className="space-y-3">
-              {recommendation.metrics.map((metric, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">
-                    {metric.label}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{metric.value}</span>
-                    <span className={`text-xs ${
-                      metric.change > 0
-                        ? "text-green-600"
-                        : metric.change < 0
-                        ? "text-red-600"
-                        : "text-muted-foreground"
-                    }`}>
-                      {metric.change > 0 ? "+" : ""}
-                      {metric.change}%
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* Implementation Steps */}
-          <Card className="p-4">
-            <h3 className="font-medium mb-4 flex items-center gap-2">
-              <Target className="w-4 h-4" /> Pasos de Implementación
-            </h3>
-            <ul className="space-y-2">
-              {recommendation.steps.map((step, index) => (
-                <li key={index} className="flex items-start gap-2">
-                  <span className="text-sm font-medium min-w-[24px]">
-                    {index + 1}.
-                  </span>
-                  <span className="text-sm">{step}</span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-
-          {/* Expected Benefits */}
-          <Card className="p-4">
-            <h3 className="font-medium mb-4">Beneficios Esperados</h3>
-            <ul className="space-y-2">
-              {recommendation.benefits.map((benefit, index) => (
-                <li key={index} className="text-sm flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5" />
-                  <span>{benefit}</span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-
-          {/* Related Recommendations */}
-          {recommendation.relatedRecommendations.length > 0 && (
-            <div className="md:col-span-2">
-              <h3 className="font-medium mb-4">Recomendaciones Relacionadas</h3>
-              <div className="space-y-2">
-                {recommendation.relatedRecommendations.map((related) => (
-                  <div
-                    key={related.id}
-                    className="flex items-center justify-between p-3 border rounded-lg"
-                  >
-                    <span className="text-sm">{related.title}</span>
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(related.status)}
-                      <span className="text-sm">
-                        {getStatusLabel(related.status)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Comments Section */}
-          <div className="md:col-span-2 space-y-4">
-            <h3 className="font-medium flex items-center gap-2">
-              <MessageSquare className="w-4 h-4" /> Comentarios
-            </h3>
-            <div className="flex gap-2">
-              <Textarea
-                placeholder="Agregar un comentario..."
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                className="flex-1"
-              />
-              <Button onClick={handleCommentSubmit}>Enviar</Button>
-            </div>
-          </div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-2">
+          <Badge className={getPriorityClass(recommendation.priority)}>
+            Prioridad: {getPriorityLabel(recommendation.priority)}
+          </Badge>
+          <Badge className={getStatusClass(recommendation.status)}>
+            <span className="flex items-center gap-1">
+              {getStatusIcon(recommendation.status)}
+              {getStatusLabel(recommendation.status)}
+            </span>
+          </Badge>
+          <Badge className={getAnswerClass(recommendation.answer)}>
+            Respuesta: {getAnswerLabel(recommendation.answer)}
+          </Badge>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        {recommendation.due_date && (
+          <div className="flex items-center text-sm text-muted-foreground">
+            <Calendar className="w-4 h-4 mr-1" />
+            {format(new Date(recommendation.due_date), 'dd/MM/yyyy')}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h3 className="text-sm font-medium">Pregunta:</h3>
+        <p className="mt-1 text-sm text-gray-700">{recommendation.question_text}</p>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-medium">Recomendación:</h3>
+        <p className="mt-1 text-sm text-gray-700">{recommendation.recommendation_text}</p>
+      </div>
+
+      {isSupplier && onStatusChange && (
+        <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-gray-200">
+          <Button
+            size="sm"
+            variant={recommendation.status === 'pending' ? 'default' : 'outline'}
+            onClick={() => handleStatusChange('pending')}
+          >
+            <AlertTriangle className="w-4 h-4 mr-2" />
+            Pendiente
+          </Button>
+          <Button
+            size="sm"
+            variant={recommendation.status === 'in_progress' ? 'default' : 'outline'}
+            onClick={() => handleStatusChange('in_progress')}
+          >
+            <Clock className="w-4 h-4 mr-2" />
+            En Progreso
+          </Button>
+          <Button
+            size="sm"
+            variant={recommendation.status === 'implemented' ? 'default' : 'outline'}
+            onClick={() => handleStatusChange('implemented')}
+          >
+            <CheckCircle2 className="w-4 h-4 mr-2" />
+            Implementada
+          </Button>
+          <Button
+            size="sm"
+            variant={recommendation.status === 'rejected' ? 'default' : 'outline'}
+            onClick={() => handleStatusChange('rejected')}
+          >
+            <XCircle className="w-4 h-4 mr-2" />
+            Rechazada
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

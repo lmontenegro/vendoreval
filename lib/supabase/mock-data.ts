@@ -685,11 +685,11 @@ export const evaluationTypes: { id: string; name: string }[] = [
 
 // Question types
 export const questionTypes = [
-  {
+  /*{
     id: 'escala 1-5',
     name: 'Escala 1-5',
     description: 'Pregunta con respuesta en escala del 1 al 5'
-  },
+  },*/
   {
     id: 'si/no/no aplica',
     name: 'Si/No/No Aplica',

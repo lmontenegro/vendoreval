@@ -21,6 +21,15 @@ import {
   X
 } from 'lucide-react';
 
+interface NavigationItem {
+  name: string;
+  href: string;
+  icon: React.ElementType;
+  permission: string;
+  alwaysShow: boolean;
+  roles?: string[]; // Lista opcional de roles que pueden ver este item
+}
+
 interface NavigationProps {
   userRole: string;
   userPermissions: string[];
@@ -74,7 +83,8 @@ export default function Navigation({ userRole, userPermissions }: NavigationProp
       href: "/recommendations",
       icon: MessageSquareWarning,
       permission: "view_recommendations",
-      alwaysShow: false
+      alwaysShow: false,
+      roles: ["admin", "evaluator", "supplier"] // Siempre visible para estos roles
     },
   ];
 
@@ -107,8 +117,15 @@ export default function Navigation({ userRole, userPermissions }: NavigationProp
 
   // Filtrar navegación según permisos
   const filteredNavigation = navigation.filter(item => {
-    const shouldShow = item.alwaysShow || userPermissions.includes(item.permission);
-    console.log(`Item ${item.name}: alwaysShow=${item.alwaysShow}, hasPermission=${userPermissions.includes(item.permission)}, shouldShow=${shouldShow}`);
+    // Verificar si el item debe mostrarse por alguna de estas condiciones:
+    // 1. Está marcado como alwaysShow
+    // 2. El usuario tiene el permiso necesario
+    // 3. El rol del usuario está en la lista de roles permitidos para este item
+    const hasPermission = userPermissions.includes(item.permission);
+    const roleAllowed = item.roles && item.roles.includes(userRole.toLowerCase());
+    const shouldShow = item.alwaysShow || hasPermission || roleAllowed;
+
+    console.log(`Item ${item.name}: alwaysShow=${item.alwaysShow}, hasPermission=${hasPermission}, roleAllowed=${roleAllowed}, shouldShow=${shouldShow}`);
     return shouldShow;
   });
 

@@ -23,6 +23,7 @@ export interface Question {
   is_required: boolean;
   order_index: number | null;
   type: Enums['question_type']; // Use the enum type
+  recommendation_text?: string | null; // Nuevo campo para texto de recomendación
 }
 
 export interface Response {
@@ -558,6 +559,16 @@ export async function createEvaluation(
           return null; // Skip invalid questions
         }
 
+        // Extraer recommendation_text del objeto question
+        let recommendationText = '';
+        if ('recommendation_text' in question && question.recommendation_text) {
+          recommendationText = question.recommendation_text;
+          console.log(`[DEBUG createEvaluation] Encontrado recommendation_text directo: "${recommendationText.substring(0, 30)}..."`);
+        } else if (question.options && typeof question.options === 'object' && 'recommendation_text' in question.options) {
+          recommendationText = question.options.recommendation_text;
+          console.log(`[DEBUG createEvaluation] Encontrado recommendation_text en options: "${recommendationText.substring(0, 30)}..."`);
+        }
+
         return {
           id: question.id || uuidv4(), // Allow providing ID or generate new one
           question_text: question.text,
@@ -569,10 +580,11 @@ export async function createEvaluation(
           weight: question.weight,
           is_required: question.required,
           order_index: question.order, // Note: order_index is in evaluation_questions now primarily
-          type: questionType
-          // Removed metadata: { evaluation_id: newEvaluationId }
+          type: questionType,
+          // Añadir recommendation_text como campo separado
+          recommendation_text: recommendationText
         };
-      }).filter(q => q !== null) as Tables['questions']['Insert'][]; // Filter out skipped and assert type
+      }).filter(q => q !== null) as Tables['questions']['Insert'][];
 
       if (questionsToInsertGlobally.length > 0) {
         // 2a. Insert into global 'questions' table
@@ -664,6 +676,7 @@ interface UpdateEvaluationData {
     subcategory?: string | null;
     description?: string | null;
     options?: any;
+    recommendation_text?: string | null;
     answerOptions?: AnswerOption[];
     isNew?: boolean;
     isDeleted?: boolean;
@@ -832,16 +845,15 @@ export async function updateEvaluation(
 
         // Paso 1: Crear las preguntas en la tabla questions
         const questionsToInsert = preparedQuestionsToCreate.map(q => ({
-          id: q.id,
           question_text: q.text,
-          type: q.type,
-          category: q.category || 'general',
+          category: q.category || 'General', // Valor por defecto
           subcategory: q.subcategory || null,
           description: q.description || null,
-          options: q.options || {},
+          options: formatQuestionOptions(q),
           weight: q.weight || 1,
-          is_required: q.required,
-          order_index: q.order || 1
+          is_required: q.required !== undefined ? q.required : true,
+          type: q.type,
+          recommendation_text: q.recommendation_text || q.options?.recommendation_text || null
         }));
 
         console.log(`[DEBUG updateEvaluation] Insertando ${questionsToInsert.length} preguntas en la base de datos:`);
@@ -1012,7 +1024,8 @@ export async function updateEvaluation(
             options: formatQuestionOptions(question),
             weight: question.weight,
             is_required: question.required,
-            type: questionType
+            type: questionType,
+            recommendation_text: question.recommendation_text || question.options?.recommendation_text || null
           };
 
           // Filtrar campos undefined
@@ -1169,7 +1182,14 @@ function isValidUUID(id: string | undefined): boolean {
 
 interface AnswerOption { id: string; text: string; }
 
-function formatQuestionOptions(question: { type: string, options?: any, answerOptions?: AnswerOption[] }) {
+function formatQuestionOptions(question: { type: string, options?: any, answerOptions?: AnswerOption[], recommendation_text?: string | null }) {
+  // Ya no necesitamos preservar recommendation_text en options ya que ahora es un campo separado en la tabla
+  // Solo extraemos el valor para devolverlo por separado más adelante en el código que llama a esta función
+  const recommendationText = question.recommendation_text ||
+    (question.options && typeof question.options === 'object' && !Array.isArray(question.options)
+      ? question.options.recommendation_text
+      : '');
+
   const needsChoices = ['multiple_choice', 'single_choice', 'checkbox'].includes(question.type);
   if (needsChoices && question.answerOptions && question.answerOptions.length > 0) {
     const validChoices = question.answerOptions
@@ -1208,9 +1228,13 @@ function formatQuestionOptions(question: { type: string, options?: any, answerOp
       return { type: question.type };
     case 'text_short': return { type: 'text_short' };
     case 'text_long': return { type: 'text_long' };
+    case 'si/no/no aplica': return { type: 'si/no/no aplica' };
+    case 'escala 1-5': return { type: 'escala 1-5', min_label: "Muy malo", max_label: "Excelente" };
     default:
       const originalOptions = { ...(question.options || {}) };
       delete originalOptions.choices;
+      // Mantener recommendation_text en las opciones para compatibilidad
+      // (aunque también se guarde como campo separado)
       return { type: question.type, ...originalOptions };
   }
 }
