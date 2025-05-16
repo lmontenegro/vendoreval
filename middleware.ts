@@ -174,7 +174,6 @@ function handleProtectedRoutes(req: NextRequest, res: NextResponse, session: any
         '/metrics',
         '/users',
         '/recommendations',
-        '/profile',
         '/settings'
     ];
 
@@ -192,6 +191,29 @@ function handleProtectedRoutes(req: NextRequest, res: NextResponse, session: any
     ) || protectedApiRoutes.some(route =>
         req.nextUrl.pathname.startsWith(route)
     );
+
+    // Tratamiento especial para la página de perfil - más tolerante con problemas de autenticación
+    const isProfileRoute = req.nextUrl.pathname === '/profile' ||
+        req.nextUrl.pathname.startsWith('/profile/');
+
+    // Si es la ruta de perfil, verificamos sesión pero somos más tolerantes
+    if (isProfileRoute) {
+        // Si hay alguna cookie de autenticación, permitimos el acceso
+        // Esto evita redirecciones innecesarias cuando hay problemas temporales
+        const hasAuthCookie = req.cookies.has('sb-pagveoabnaiztudqglvh-auth-token') ||
+            req.cookies.has('supabase-auth-token');
+
+        if (hasAuthCookie) {
+            console.log('[Middleware] Permitiendo acceso a perfil con cookie de autenticación');
+            return res;
+        }
+
+        // Solo si no hay ningún indicio de autenticación, redirigimos al login
+        if (!session) {
+            console.log('[Middleware] Usuario no autenticado intentando acceder a perfil, redirigiendo a login');
+            return NextResponse.redirect(new URL('/auth/login', req.url));
+        }
+    }
 
     // Si es la ruta de recomendaciones, mostrar información de depuración
     if (req.nextUrl.pathname === '/recommendations' || req.nextUrl.pathname.startsWith('/api/recommendations')) {

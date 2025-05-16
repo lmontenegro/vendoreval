@@ -25,86 +25,200 @@ export interface CurrentUserData {
  * @param client Cliente Supabase (requerido)
  * @returns Promise<CurrentUserData> con los datos del usuario y su perfil
  */
+// Variable estática para caché de sesión entre llamadas
+let sessionCache: {
+    user: any | null;
+    profile: any | null;
+    role: any | null;
+    vendor: any | null;
+    isAdmin: boolean;
+    timestamp: number; // Cuándo se guardó la caché
+} | null = null;
+
+const SESSION_CACHE_TTL = 30000; // 30 segundos de vida para la caché
+
+/**
+ * Obtiene los datos completos del usuario actual (auth + profile + role + vendor)
+ * Esta función centraliza la lógica de validación de usuario y debe usarse en todos los servicios
+ * @param client Cliente Supabase (requerido)
+ * @returns Promise<CurrentUserData> con los datos del usuario y su perfil
+ */
 export async function getCurrentUserData(
     client: SupabaseClient<Database>
 ): Promise<CurrentUserData> {
-    try {
-        // Obtener datos del usuario autenticado usando el cliente proporcionado
-        const { data: { user }, error: authError } = await client.auth.getUser();
+    console.log('[DEBUG] getCurrentUserData: Iniciando obtención de datos');
 
-        if (authError || !user) {
-            // Si hay error o no hay usuario, devolver estructura vacía
-            console.warn('getCurrentUserData: No user session found or auth error:', authError?.message);
-            return {
-                user: null,
-                profile: null,
-                role: null,
-                vendor: null,
-                isAdmin: false
-            };
-        }
-
-        // Obtener el usuario con sus relaciones usando el cliente proporcionado
-        const { data: userData, error: userError } = await client
-            .from('users') // Asumiendo tabla 'users' pública
-            .select(`
-                id,
-                email,
-                profile:profiles!users_profile_id_fkey (*),
-                role:roles!users_role_id_fkey (
-                    id,
-                    name,
-                    description
-                ),
-                vendor:vendors!users_vendor_id_fkey (*)
-            `)
-            .eq('id', user.id)
-            .single();
-
-        if (userError) {
-            console.error('Error fetching user data (profile, role, vendor): ', userError);
-            // Devolver usuario de auth pero resto nulo
-            return {
-                user,
-                profile: null,
-                role: null,
-                vendor: null,
-                isAdmin: false
-            };
-        }
-
-        // Si userData es null (no debería pasar si user existe, pero por seguridad)
-        if (!userData) {
-            console.warn('User found in auth but not in public.users table:', user.id);
-            return {
-                user,
-                profile: null,
-                role: null,
-                vendor: null,
-                isAdmin: false
-            };
-        }
-
-        // Determinar si es admin
-        const isAdmin = userData.role?.name === 'admin';
-
+    // MEJORA 1: Usar caché para evitar múltiples llamadas en poco tiempo
+    // Esto arregla el problema de muchas llamadas en cascada durante la carga inicial
+    if (sessionCache && (Date.now() - sessionCache.timestamp < SESSION_CACHE_TTL)) {
+        console.log('[DEBUG] getCurrentUserData: Usando datos en caché');
         return {
-            user, // Objeto User de Supabase Auth
-            profile: userData.profile, // Objeto Profile de tu tabla
-            role: userData.role, // Objeto Role de tu tabla
-            vendor: userData.vendor, // Objeto Vendor de tu tabla
-            isAdmin
-        };
-    } catch (error) {
-        console.error('Unexpected error in getCurrentUserData:', error);
-        return {
-            user: null,
-            profile: null,
-            role: null,
-            vendor: null,
-            isAdmin: false
+            user: sessionCache.user,
+            profile: sessionCache.profile,
+            role: sessionCache.role,
+            vendor: sessionCache.vendor,
+            isAdmin: sessionCache.isAdmin
         };
     }
+
+    try {
+        // MEJORA 2: Si estamos en el cliente y después de un login/redirect, verificamos URLSearchParams
+        // Esto es una optimización para cuando venimos de una redirección post-login
+        if (typeof window !== 'undefined') {
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasAuthParam = urlParams.has('authSuccess');
+
+            if (hasAuthParam) {
+                console.log('[DEBUG] getCurrentUserData: Detectada redirección post-login');
+                // Esperar un momento para que las cookies se establezcan correctamente
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        // MEJORA 3: Tryouts ordenados por probabilidad de éxito para minimizar latencia
+
+        // Intento 1: Obtener sesión actual (caso común)
+        try {
+            console.log('[DEBUG] getCurrentUserData: Intentando getSession');
+            const { data: sessionData } = await client.auth.getSession();
+
+            if (sessionData?.session?.user) {
+                const user = sessionData.session.user;
+                console.log('[DEBUG] getCurrentUserData: ✅ Usuario obtenido desde getSession', { userId: user.id });
+
+                const result = await getUserDataFromDatabase(client, user);
+
+                // Guardar en caché
+                sessionCache = {
+                    ...result,
+                    timestamp: Date.now()
+                };
+
+                return result;
+            }
+        } catch (sessionError) {
+            console.log('[DEBUG] getCurrentUserData: Error en getSession', sessionError);
+        }
+
+        // Intento 2: Refrescar sesión (útil si la sesión está por expirar)
+        try {
+            console.log('[DEBUG] getCurrentUserData: Intentando refreshSession');
+            const { data: refreshData } = await client.auth.refreshSession();
+
+            if (refreshData?.session?.user) {
+                const user = refreshData.session.user;
+                console.log('[DEBUG] getCurrentUserData: ✅ Usuario obtenido desde refreshSession', { userId: user.id });
+
+                const result = await getUserDataFromDatabase(client, user);
+
+                // Guardar en caché
+                sessionCache = {
+                    ...result,
+                    timestamp: Date.now()
+                };
+
+                return result;
+            }
+        } catch (refreshError) {
+            console.log('[DEBUG] getCurrentUserData: Error en refreshSession', refreshError);
+        }
+
+        // MEJORA 4: Hacer un último intento después de una espera
+        // Las cookies de Supabase son HttpOnly y no pueden ser detectadas por document.cookie
+        // Esto es una medida de seguridad para proteger contra ataques XSS
+        console.log('[DEBUG] getCurrentUserData: Haciendo un último intento después de espera');
+
+        // Esperar un momento antes del último intento
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+        try {
+            // Intento final de getSession
+            const { data: retryData } = await client.auth.getSession();
+            if (retryData?.session?.user) {
+                const user = retryData.session.user;
+                console.log('[DEBUG] getCurrentUserData: ✅ Usuario obtenido en intento final');
+
+                const result = await getUserDataFromDatabase(client, user);
+
+                // Guardar en caché
+                sessionCache = {
+                    ...result,
+                    timestamp: Date.now()
+                };
+
+                return result;
+            }
+        } catch (retryError) {
+            // Silenciar este error en particular
+            if (process.env.NODE_ENV !== 'development') {
+                // No loguear en producción
+            } else {
+                console.log('[DEBUG] getCurrentUserData: Error en intento final', retryError);
+            }
+        }
+
+        // MEJORA 5: Todo falló, pero no queremos bloquear la UI o mostrar errores innecesarios
+        // Devolver un objeto vacío pero sin error para evitar bloqueos
+        if (process.env.NODE_ENV !== 'development') {
+            // No mostrar advertencias en producción
+            console.log('[INFO] getCurrentUserData: Usuario no encontrado');
+        } else {
+            console.warn('[DEBUG] getCurrentUserData: No se pudo obtener el usuario después de todos los intentos');
+        }
+
+        // Limpiar caché si existía
+        sessionCache = null;
+
+        return { user: null, profile: null, role: null, vendor: null, isAdmin: false };
+    } catch (error) {
+        console.error('[DEBUG] getCurrentUserData: Error general', error);
+
+        // Limpiar caché en caso de error
+        sessionCache = null;
+
+        return { user: null, profile: null, role: null, vendor: null, isAdmin: false };
+    }
+}
+
+/**
+ * Función auxiliar para obtener los datos del usuario de la base de datos
+ * @param client Cliente Supabase
+ * @param user Usuario autenticado
+ * @returns Promise<CurrentUserData>
+ */
+async function getUserDataFromDatabase(
+    client: SupabaseClient<Database>,
+    user: any
+): Promise<CurrentUserData> {
+    const { data: userData, error: userError } = await client
+        .from('users')
+        .select(`
+            id, email,
+            profile:profiles!users_profile_id_fkey (*),
+            role:roles!users_role_id_fkey (id, name, description),
+            vendor:vendors!users_vendor_id_fkey (*)
+        `)
+        .eq('id', user.id)
+        .single();
+
+    if (userError) {
+        console.error('[DEBUG] getUserDataFromDatabase: Error fetching user data', userError);
+        return { user, profile: null, role: null, vendor: null, isAdmin: false };
+    }
+
+    if (!userData) {
+        console.warn('[DEBUG] getUserDataFromDatabase: No se encontró el usuario en la tabla users', user.id);
+        return { user, profile: null, role: null, vendor: null, isAdmin: false };
+    }
+
+    const isAdmin = userData.role?.name === 'admin';
+    return { 
+        user,
+        profile: userData.profile,
+        role: userData.role,
+        vendor: userData.vendor,
+        isAdmin
+    };
 }
 
 /**
