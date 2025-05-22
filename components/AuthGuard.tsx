@@ -38,7 +38,6 @@ export default function AuthGuard({
 
       // Si no hay usuario después de cargar, redirigir
       if (!user) {
-        console.log('AuthGuard: No user found, redirecting to login.');
         router.push(fallbackPath);
         setIsChecking(false);
         return;
@@ -59,7 +58,6 @@ export default function AuthGuard({
 
           if (permResponse.status === 403) { // Específicamente buscar 403
             hasRequiredPermission = false;
-            console.log(`AuthGuard: Permission denied for ${requiredModule}:${requiredAction}`);
           } else if (!permResponse.ok) {
              // Otros errores de la API de permisos
             const errorData = await permResponse.json();
@@ -75,7 +73,6 @@ export default function AuthGuard({
           if (!roleResponse.ok) {
             if (roleResponse.status === 401) {
               // El usuario podría haberse deslogueado entretanto
-              console.log('AuthGuard: User unauthenticated during role check, redirecting.');
               router.push(fallbackPath);
               setIsChecking(false);
               return;
@@ -87,7 +84,6 @@ export default function AuthGuard({
           const { roleName } = await roleResponse.json();
           if (!requiredRoles.includes(roleName)) {
             hasRequiredRole = false;
-            console.log(`AuthGuard: Role \'${roleName}\' not in required roles [${requiredRoles.join(', ')}]`);
           }
         }
 
@@ -96,8 +92,6 @@ export default function AuthGuard({
         setIsAuthorized(authorized);
 
         if (!authorized) {
-          console.log('AuthGuard: Access denied, redirecting...');
-          // Opcional: Mostrar un toast antes de redirigir
           toast({
               title: "Acceso Denegado",
               description: "No tienes los permisos o el rol necesario para acceder a esta página.",
@@ -108,7 +102,6 @@ export default function AuthGuard({
         }
 
       } catch (error: any) {
-        console.error("AuthGuard: Error during access check:", error);
         toast({
             title: "Error de Verificación",
             description: error.message || "Ocurrió un error al verificar tu acceso.",

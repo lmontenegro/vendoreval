@@ -14,11 +14,6 @@ export default function DashboardClientLayout({ children, userRole, userPermissi
   const pathname = usePathname();
   
   // Puedes agregar hooks o lógica de cliente aquí
-  useEffect(() => {
-    // Ejemplo: analytics, cargar preferencias del usuario, etc.
-    console.log("Dashboard layout montado, rol:", userRole);
-    console.log("Permisos del usuario:", userPermissions);
-  }, [userRole, userPermissions]);
 
   return (
     <div id="dashboard-client-layout" data-user-role={userRole} className="min-h-screen bg-gray-100 dark:bg-gray-950">

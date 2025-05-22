@@ -127,10 +127,6 @@ export async function updateVendor(
   try {
     // La verificación de permisos ya no se hace aquí
 
-    // ---- AÑADIR ESTE LOG ----
-    console.log("Service (updateVendor): Datos recibidos para actualizar:", JSON.stringify(vendorData, null, 2));
-    // ---- FIN LOG ----
-
     // Actualizar el proveedor
     const { error } = await client
       .from('vendors')

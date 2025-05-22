@@ -207,6 +207,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
+    console.log('[DEBUGLUIS] INICIO ENDPOINT RESPOND');
     console.error("==== INICIO DE PROCESAMIENTO DE RESPUESTA ====");
     console.error(`Evaluación ID: ${params.id}`);
 
@@ -322,6 +323,7 @@ export async function POST(
 
     // Obtener los datos del cuerpo de la solicitud
     const { responses, status, progress } = await request.json();
+    console.log('[DEBUGLUIS] DATOS RECIBIDOS:', { responses, status, progress });
     console.error("DATOS RECIBIDOS:");
     console.error(`- Status: ${status}`);
     console.error(`- Progress: ${progress}`);
@@ -436,13 +438,27 @@ export async function POST(
       });
     }
 
+    // Obtener el peso y tipo de cada pregunta para calcular el score
+    const { data: questionsData, error: questionsError } = await supabase
+      .from('questions')
+      .select('id, weight, type')
+      .in('id', validResponses.map(r => r.question_id));
+    if (questionsError) {
+      console.log('[DEBUGLUIS] Error al obtener datos de preguntas para score:', questionsError);
+      return NextResponse.json(
+        { error: 'Error al obtener datos de preguntas para score' },
+        { status: 500 }
+      );
+    }
+    const questionInfoMap = new Map(questionsData?.map(q => [q.id, { weight: q.weight || 1, type: q.type }]));
+
     // Respuestas para actualizar y respuestas para insertar
     const updateResponses = [];
     const insertResponses = [];
 
     // Separar las respuestas en actualizaciones e inserciones
     for (const response of validResponses) {
-      const { question_id, response_value, notes, evidence_urls } = response;
+      const { question_id, response_value, notes, evidence_urls, answer } = response;
 
       if (!question_id || !response_value) {
         console.log("[DEBUG] Respuesta incompleta, saltando:", question_id);
@@ -459,6 +475,35 @@ export async function POST(
         continue;
       }
 
+      const questionInfo = questionInfoMap.get(question_id) || { weight: 1, type: undefined };
+      let score = 0;
+      let answerValue = answer;
+      // Calcular el score según la lógica de negocio
+      if (questionInfo.type === 'si/no/no aplica') {
+        if (response_value === 'Yes' || answer === 'Yes') {
+          score = questionInfo.weight;
+          answerValue = 'Yes';
+        } else if (response_value === 'No' || answer === 'No') {
+          score = 0;
+          answerValue = 'No';
+        } else if (response_value === 'N/A' || answer === 'N/A') {
+          score = 0;
+          answerValue = 'N/A';
+        }
+      } else if (questionInfo.type === 'escala 1-5') {
+        const value = parseInt(response_value);
+        if (!isNaN(value)) {
+          score = (value / 5) * questionInfo.weight;
+        }
+      }
+      console.log('[DEBUGLUIS] Procesando respuesta:', {
+        question_id,
+        response_value,
+        answer: answerValue,
+        weight: questionInfo.weight,
+        type: questionInfo.type,
+        score
+      });
       // Preparar datos validados
       const validatedData: {
         evaluation_id: string;
@@ -480,14 +525,10 @@ export async function POST(
         notes: notes || null,
         evidence_urls: evidence_urls || null,
         vendor_id: userData.vendor_id,
-        score: 0, // Campo obligatorio según el esquema
+        score,
+        answer: answerValue
       };
-
-      // Manejar el campo answer si es de tipo si/no/no aplica
-      if (response_value === 'Yes' || response_value === 'No' || response_value === 'N/A') {
-        validatedData.answer = response_value as 'Yes' | 'No' | 'N/A';
-        console.log(`[DEBUG] Asignando valor de answer: ${validatedData.answer}`);
-      }
+      console.log('[DEBUGLUIS] Payload final a guardar:', validatedData);
 
       // Verificar si ya existe una respuesta para esta pregunta
       if (existingResponseMap.has(question_id)) {
@@ -498,11 +539,11 @@ export async function POST(
           ...validatedData,
           updated_at: new Date().toISOString()
         });
-        console.log(`[DEBUG] Actualizando respuesta existente con ID: ${responseData.id}`);
+        console.log(`[DEBUGLUIS] Actualizando respuesta existente con ID: ${responseData.id}`);
       } else {
         // Si no existe una respuesta previa para esta pregunta, crear un nuevo registro
         insertResponses.push(validatedData);
-        console.log(`[DEBUG] Creando nueva respuesta para pregunta: ${question_id}`);
+        console.log(`[DEBUGLUIS] Creando nueva respuesta para pregunta: ${question_id}`);
       }
     }
 
@@ -927,9 +968,9 @@ export async function POST(
       saved: updateResponses.length + insertResponses.length
     });
   } catch (error) {
-    console.error("[DEBUG] Error al procesar la solicitud:", error);
+    console.error('[DEBUGLUIS] Error en endpoint respond:', error);
     return NextResponse.json(
-      { error: "Error interno del servidor" },
+      { error: 'Error interno del servidor' },
       { status: 500 }
     );
   }

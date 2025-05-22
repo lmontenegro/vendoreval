@@ -205,17 +205,27 @@ export default function RespondEvaluation({ params }: { params: { id: string } }
   };
 
   const handleResponseChange = (questionId: string, value: string) => {
+    let answer = value;
+    // Solo para preguntas si/no/no aplica
+    if (evaluation?.questions) {
+      const question = evaluation.questions.find(q => q.id === questionId);
+      if (question && question.type === "si/no/no aplica") {
+        if (value.toLowerCase() === "sí" || value === "Yes") answer = "Yes";
+        else if (value.toLowerCase() === "no") answer = "No";
+        else if (value.toLowerCase() === "no aplica" || value === "N/A" || value === "n/a") answer = "N/A";
+      }
+    }
+    console.log('[DEBUG] handleResponseChange:', { questionId, valueOriginal: value, answerEstandarizado: answer });
     const updatedResponses = {
       ...responses,
       [questionId]: {
         ...responses[questionId],
         question_id: questionId,
         response_value: value,
+        answer, // <-- aquí se estandariza
       },
     };
-
     setResponses(updatedResponses);
-
     if (evaluation?.questions) {
       calculateProgress(updatedResponses, evaluation.questions);
     }
@@ -277,13 +287,7 @@ export default function RespondEvaluation({ params }: { params: { id: string } }
 
       // Convert responses object to array
       const responsesArray = Object.values(responses).filter(r => r.question_id);
-
-      console.log("Enviando respuestas:", {
-        responsesArray,
-        status: submitFinal ? 'completed' : 'in_progress',
-        progress
-      });
-
+      console.log('[DEBUG] handleSaveResponses: Enviando respuestas al backend', { responsesArray, status: submitFinal ? 'completed' : 'in_progress', progress });
       const newStatus = submitFinal ? 'completed' : 'in_progress';
 
       const response = await fetch(`/api/evaluations/${params.id}/respond`, {
@@ -297,11 +301,15 @@ export default function RespondEvaluation({ params }: { params: { id: string } }
           progress: progress,
         }),
       });
-
+      let backendData = null;
       if (!response.ok) {
         const errorData = await response.json();
-        console.error("Error response:", errorData);
+        backendData = errorData;
+        console.error('[DEBUG] handleSaveResponses: Error response del backend', errorData);
         throw new Error(errorData.error || errorData.message || "Error al guardar las respuestas");
+      } else {
+        backendData = await response.json();
+        console.log('[DEBUG] handleSaveResponses: Respuesta exitosa del backend', backendData);
       }
 
       toast({

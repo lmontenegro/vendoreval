@@ -25,7 +25,6 @@ export function useUser(): UseUserResult {
                 if (data?.session?.user) {
                     setUser(data.session.user);
                     setError(null);
-                    console.log("[useUser] Usuario obtenido desde getSession:", data.session.user.id);
                     return;
                 }
 
@@ -41,7 +40,6 @@ export function useUser(): UseUserResult {
                     if (userData?.user) {
                         setUser(userData.user);
                         setError(null);
-                        console.log("[useUser] Usuario obtenido desde getUser:", userData.user.id);
                         return;
                     }
 
@@ -60,7 +58,6 @@ export function useUser(): UseUserResult {
                 }
 
                 // Si llegamos aquí sin usuario, probablemente no hay sesión
-                console.log("[useUser] No se encontró usuario autenticado");
                 setUser(null);
             } catch (err) {
                 console.error('[useUser] Error:', err);
@@ -75,22 +72,18 @@ export function useUser(): UseUserResult {
 
         // Suscribirse a cambios en el estado de autenticación
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            console.log("[useUser] Evento de autenticación:", event);
             if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
                 if (session?.user) {
-                    console.log("[useUser] Usuario actualizado desde evento:", session.user.id);
                     setUser(session.user);
                     setError(null);
                 }
             } else if (event === 'SIGNED_OUT') {
-                console.log("[useUser] Usuario cerró sesión");
                 setUser(null);
             }
         });
 
         // Limpiar suscripción al desmontar
         return () => {
-            console.log("[useUser] Limpiando suscripción de autenticación");
             subscription.unsubscribe();
         };
     }, []);

@@ -94,11 +94,6 @@ export default function Navigation({ userRole, userPermissions }: NavigationProp
       href: "/profile",
       icon: UserCircle,
     },
-    {
-      name: "Configuración",
-      href: "/settings",
-      icon: Settings,
-    },
   ];
 
   const handleLogout = async () => {
@@ -124,8 +119,6 @@ export default function Navigation({ userRole, userPermissions }: NavigationProp
     const hasPermission = userPermissions.includes(item.permission);
     const roleAllowed = item.roles && item.roles.includes(userRole.toLowerCase());
     const shouldShow = item.alwaysShow || hasPermission || roleAllowed;
-
-    console.log(`Item ${item.name}: alwaysShow=${item.alwaysShow}, hasPermission=${hasPermission}, roleAllowed=${roleAllowed}, shouldShow=${shouldShow}`);
     return shouldShow;
   });
 
@@ -172,12 +165,7 @@ export default function Navigation({ userRole, userPermissions }: NavigationProp
             />
           </div>
 
-          {/* User info with role */}
-          {userRole && (
-            <div className="px-4 py-2 bg-muted/30 border-b">
-              <p className="text-sm font-medium text-primary">{userRole}</p>
-            </div>
-          )}
+          
 
           {/* Navigation */}
           <nav className="flex-1 space-y-1 px-2 py-4">

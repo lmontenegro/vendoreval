@@ -46,7 +46,6 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
   const fetchVendors = async () => {
     try {
       setLoading(true);
-      console.log(`🔄 Obteniendo proveedores para evaluación: ${evaluationId}`);
 
       const response = await fetch(`/api/evaluations/${evaluationId}/vendors`);
 
@@ -71,13 +70,10 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
         .map((v: Vendor) => v.vendor_id)
         .filter(Boolean);
 
-      console.log(`✅ Proveedores cargados: ${vendorIds.length}`);
-
       // Actualizar el estado
       setSelectedVendorIds(vendorIds);
       initialLoadComplete.current = true;
     } catch (error) {
-      console.error("Error fetching vendors:", error);
       // En caso de error, establecer arrays vacíos para evitar undefined
       setVendors([]);
       setSelectedVendorIds([]);
@@ -102,7 +98,6 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
     e.preventDefault();
     e.stopPropagation();
 
-    console.log("Iniciando modo de edición");
     setEditing(true);
   };
 
@@ -119,7 +114,6 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
   const saveVendors = async () => {
     try {
       setSaving(true);
-      console.log(`💾 Guardando ${selectedVendorIds.length} proveedores para evaluación ${evaluationId}`);
 
       const response = await fetch(`/api/evaluations/${evaluationId}/vendors`, {
         method: 'POST',
@@ -143,7 +137,6 @@ export function VendorAssignment({ evaluationId, canManage = false }: VendorAssi
         description: "Los proveedores se han asignado correctamente"
       });
     } catch (error: any) {
-      console.error("Error saving vendors:", error);
       toast({
         variant: "destructive",
         title: "Error",
