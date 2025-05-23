@@ -63,7 +63,7 @@ export async function GET() {
       );
     }
 
-    // 3. Verificar si el usuario es un proveedor
+    // 3. Verificar permisos basados en el rol
     const userRole = userData?.role?.name;
     const vendorId = userData?.vendor_id;
 
@@ -72,39 +72,77 @@ export async function GET() {
     console.log('- Rol:', userRole);
     console.log('- Vendor ID:', vendorId);
 
-    if (userRole !== 'supplier' || !vendorId) {
+    // Permitir acceso a administradores y proveedores
+    const isAdmin = userRole === 'admin';
+    const isSupplier = userRole === 'supplier' && vendorId;
+
+    if (!isAdmin && !isSupplier) {
       return NextResponse.json(
-        { error: 'Acceso no autorizado o datos de proveedor no encontrados' },
+        { error: 'Acceso no autorizado. Solo administradores y proveedores pueden ver recomendaciones.' },
         { status: 403 }
       );
     }
 
-    console.log('Vendor ID:', vendorId);
+    // 4. Obtener las evaluaciones según el rol del usuario
+    let completedEvaluationVendors;
 
-    // 4. Obtener las evaluaciones asignadas al proveedor que estén completadas
-    // Usamos supabaseAdmin para evitar restricciones de RLS
-    const { data: completedEvaluationVendors, error: evError } = await supabaseAdmin
-      .from('evaluation_vendors')
-      .select(`
-        id,
-        evaluation_id,
-        status,
-        completed_at,
-        evaluations:evaluation_id(
-          id, 
-          title,
-          status
-        )
-      `)
-      .eq('vendor_id', vendorId)
-      .eq('status', 'completed');
+    if (isAdmin) {
+      // Los administradores pueden ver todas las evaluaciones completadas
+      console.log('Usuario administrador: obteniendo todas las evaluaciones');
+      const { data: allEvaluationVendors, error: evError } = await supabaseAdmin
+        .from('evaluation_vendors')
+        .select(`
+          id,
+          evaluation_id,
+          vendor_id,
+          status,
+          completed_at,
+          evaluations:evaluation_id(
+            id, 
+            title,
+            status
+          )
+        `)
+        .eq('status', 'completed');
 
-    if (evError) {
-      console.error('Error al obtener evaluaciones del proveedor:', evError);
-      return NextResponse.json(
-        { error: 'Error al obtener evaluaciones asignadas' },
-        { status: 500 }
-      );
+      if (evError) {
+        console.error('Error al obtener todas las evaluaciones:', evError);
+        return NextResponse.json(
+          { error: 'Error al obtener evaluaciones' },
+          { status: 500 }
+        );
+      }
+
+      completedEvaluationVendors = allEvaluationVendors;
+    } else {
+      // Los proveedores solo ven sus evaluaciones
+      console.log('Usuario proveedor: obteniendo evaluaciones del vendor ID:', vendorId);
+      const { data: vendorEvaluationVendors, error: evError } = await supabaseAdmin
+        .from('evaluation_vendors')
+        .select(`
+          id,
+          evaluation_id,
+          vendor_id,
+          status,
+          completed_at,
+          evaluations:evaluation_id(
+            id,
+            title,
+            status
+          )
+        `)
+        .eq('vendor_id', vendorId!)
+        .eq('status', 'completed');
+
+      if (evError) {
+        console.error('Error al obtener evaluaciones del proveedor:', evError);
+        return NextResponse.json(
+          { error: 'Error al obtener evaluaciones asignadas' },
+          { status: 500 }
+        );
+      }
+
+      completedEvaluationVendors = vendorEvaluationVendors;
     }
 
     console.log('Evaluaciones completadas encontradas:', completedEvaluationVendors?.length || 0);
@@ -160,38 +198,54 @@ export async function GET() {
       const evaluationIds = completedEvaluationVendors.map(ev => ev.evaluation_id);
       console.log('Intentando método alternativo con evaluation_ids:', evaluationIds);
 
-      const { data: alternativeResponses, error: altResponsesError } = await supabaseAdmin
-        .from('responses')
-        .select(`
-          id,
-          response_value,
-          answer,
-          question_id,
-          evaluation_question_id,
-          evaluation_vendor_id,
-          evaluation_id
-        `)
-        .in('evaluation_id', evaluationIds)
-        .eq('vendor_id', vendorId);
+      let alternativeResponses;
+      if (isAdmin) {
+        // Para admin, obtener todas las respuestas de estas evaluaciones
+        const { data: adminResponses, error: altResponsesError } = await supabaseAdmin
+          .from('responses')
+          .select(`
+            id,
+            response_value,
+            answer,
+            question_id,
+            evaluation_question_id,
+            evaluation_vendor_id,
+            evaluation_id
+          `)
+          .in('evaluation_id', evaluationIds);
 
-      if (altResponsesError) {
-        console.error('Error al obtener respuestas con método alternativo:', altResponsesError);
-        return NextResponse.json({ data: [] });
+        if (altResponsesError) {
+          console.error('Error al obtener respuestas con método alternativo (admin):', altResponsesError);
+          return NextResponse.json({ data: [] });
+        }
+        alternativeResponses = adminResponses;
+      } else {
+        // Para proveedor, filtrar por vendor_id
+        const { data: supplierResponses, error: altResponsesError } = await supabaseAdmin
+          .from('responses')
+          .select(`
+            id,
+            response_value,
+            answer,
+            question_id,
+            evaluation_question_id,
+            evaluation_vendor_id,
+            evaluation_id
+          `)
+          .in('evaluation_id', evaluationIds)
+          .eq('vendor_id', vendorId!);
+
+        if (altResponsesError) {
+          console.error('Error al obtener respuestas con método alternativo (proveedor):', altResponsesError);
+          return NextResponse.json({ data: [] });
+        }
+        alternativeResponses = supplierResponses;
       }
 
       console.log(`Respuestas encontradas con método alternativo: ${alternativeResponses?.length || 0}`);
 
       if (!alternativeResponses || alternativeResponses.length === 0) {
         console.log('No se encontraron respuestas con ningún método');
-
-        // Último intento: consultar directamente sin filtros para depuración
-        const { data: debugResponses } = await supabaseAdmin
-          .from('responses')
-          .select('count')
-          .eq('vendor_id', vendorId);
-
-        console.log(`DEBUG: Total de respuestas para este vendor_id: ${debugResponses?.length || 0}`);
-
         return NextResponse.json({ data: [] });
       }
 

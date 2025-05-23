@@ -18,7 +18,8 @@ import {
   Settings,
   LogOut,
   Menu,
-  X
+  X,
+  BarChart3
 } from 'lucide-react';
 
 interface NavigationItem {
@@ -85,6 +86,14 @@ export default function Navigation({ userRole, userPermissions }: NavigationProp
       permission: "view_recommendations",
       alwaysShow: false,
       roles: ["admin", "evaluator", "supplier"] // Siempre visible para estos roles
+    },
+    {
+      name: "Panel Admin - Recomendaciones",
+      href: "/recommendations/admin",
+      icon: BarChart3,
+      permission: "view_admin_recommendations",
+      alwaysShow: false,
+      roles: ["admin"] // Solo visible para administradores
     },
   ];
 
